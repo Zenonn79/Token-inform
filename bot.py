@@ -97,17 +97,9 @@ def create_price_chart(prices_data):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start та автоматичний старт при першому повідомленні"""
-    # Видаляємо всі попередні повідомлення від користувача в чаті
+    # Видаляємо користувацьке повідомлення що спричинило старт
     try:
-        # Спробуємо видалити декілька останніх повідомлень
-        chat_id = update.effective_chat.id
-        message_id = update.message.message_id
-        
-        for i in range(1, 20):  # Видаляємо до 20 попередніх повідомлень
-            try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message_id - i)
-            except:
-                pass
+        await update.message.delete()
     except:
         pass
     
@@ -116,6 +108,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['price_history'] = deque(maxlen=20)
     if 'show_price_active' not in context.user_data:
         context.user_data['show_price_active'] = False
+    if 'last_menu_message_id' not in context.user_data:
+        context.user_data['last_menu_message_id'] = None
     
     keyboard = [
         [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
@@ -263,10 +257,14 @@ async def show_chart(query, context):
     prices_data = list(context.user_data.get('price_history', []))
     
     if len(prices_data) < 2:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             "📈 <b>Історія цін</b>\n\n"
             "⚠️ Недостатньо даних для графіка.\n"
             "Дивись на курс хоча б 2 рази (20 сек) для накопичення даних.",
+            reply_markup=reply_markup,
             parse_mode="HTML"
         )
     else:
@@ -278,16 +276,17 @@ async def show_chart(query, context):
                 
                 message_text = (
                     "📈 <b>Графік цін Ефіра</b>\n\n"
-                    f"📊 Дата поточна: {datetime.now().strftime('%Y-%m-%d')}\n"
-                    f"🔢 Дані в графіку: {len(prices_data)} точок\n"
+                    f"📊 Дата: {datetime.now().strftime('%Y-%m-%d')}\n"
+                    f"🔢 Дані: {len(prices_data)} точок\n"
                     f"💰 Мінімум: ${min(p[1] for p in prices_data):,.2f}\n"
                     f"💰 Максимум: ${max(p[1] for p in prices_data):,.2f}\n"
-                    f"📍 Остання ціна: ${prices_data[-1][1]:,.2f}"
+                    f"📍 Остання: ${prices_data[-1][1]:,.2f}"
                 )
                 
                 keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
+                # Відправляємо графік як відповідь
                 await query.message.reply_photo(
                     photo=chart_buffer,
                     caption=message_text,
@@ -295,27 +294,26 @@ async def show_chart(query, context):
                     reply_markup=reply_markup
                 )
                 
+                # Видаляємо старе меню повідомлення
                 try:
                     await query.message.delete()
                 except:
                     pass
             else:
-                await query.edit_message_text("❌ Помилка при створенні графіка.")
+                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(
+                    "❌ Помилка при створенні графіка.",
+                    reply_markup=reply_markup
+                )
         except Exception as e:
             logger.error(f"Помилка при показі графіка: {e}")
-            await query.edit_message_text("❌ Помилка при показі графіка.")
-    
-    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if len(prices_data) < 2:
-        await query.edit_message_text(
-            "📈 <b>Історія цін</b>\n\n"
-            "⚠️ Недостатньо даних для графіка.\n"
-            "Дивись на курс хоча б 2 рази (20 сек) для накопичення даних.",
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "❌ Помилка при показі графіка.",
+                reply_markup=reply_markup
+            )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обробляє натискання кнопок"""
