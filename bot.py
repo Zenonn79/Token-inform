@@ -1,4 +1,5 @@
 import logging
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -23,8 +24,13 @@ logger = logging.getLogger(__name__)
 # Стани для ConversationHandler
 SET_LOWER, SET_UPPER, MONITORING = range(3)
 
-# Твій Telegram token
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+# Отримуємо токен з Environment Variables
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Перевіряємо, чи токен встановлено
+if not TELEGRAM_TOKEN:
+    logger.error("❌ ПОМИЛКА: Не встановлено TELEGRAM_BOT_TOKEN в Environment Variables!")
+    raise ValueError("TELEGRAM_BOT_TOKEN не знайдено в змінних оточення")
 
 # API для отримання курсу ETH (використовуємо CoinGecko - вільна API)
 async def get_eth_price():
