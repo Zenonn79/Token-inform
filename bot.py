@@ -127,16 +127,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message_text = (
-        "╔════════════════════════════════════╗\n"
-        "║   🚀 ETH PRICE MONITOR 🚀          ║\n"
-        "║  Слідкування за курсом Ефіра      ║\n"
-        "╚════════════════════════════════════╝\n\n"
-        "✨ <b>Вибери дію:</b>\n"
-        "• 📊 Переглянь поточний курс\n"
-        "• 📍 Встанови цільові ціни\n"
-        "• 📈 Дивись історію цін (графік)\n"
-        "• ⚙️ Перегляд своїх цілей\n\n"
-        "<i>Бот буде сигналізувати при досягненні цілей 🔔</i>"
+        "🚀 <b>ETH Price Monitor</b>\n\n"
+        "Слідкування за курсом Ефіра в реальному часі\n\n"
+        "✨ <b>Доступні функції:</b>\n"
+        "📊 Показати поточний курс\n"
+        "📍 Встановити цільові ціни\n"
+        "📈 Переглянути графік цін\n"
+        "⚙️ Дивитися свої цілі\n\n"
+        "<i>Бот автоматично сигналізує при досягненні цілей 🔔</i>"
     )
     
     await update.message.reply_text(
@@ -219,6 +217,10 @@ async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_current_price(query, context):
     """Показує поточний курс ETH з автооновленням"""
+    # Ініціалізуємо price_history якщо його немає
+    if 'price_history' not in context.user_data:
+        context.user_data['price_history'] = deque(maxlen=20)
+    
     context.user_data['show_price_active'] = True
     
     price = await get_eth_price()
@@ -232,10 +234,9 @@ async def show_current_price(query, context):
             (datetime.now().strftime('%H:%M'), price)
         )
         
-        message = "╔════════════════════════════════════╗\n"
-        message += f"║  💰 КУРС ЕФІРА: ${price:,.2f}        ║\n"
-        message += "╚════════════════════════════════════╝\n\n"
-        message += f"⏰ Час: {datetime.now().strftime('%H:%M:%S')}\n"
+        message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
+        message += f"<code>${price:,.2f}</code>\n\n"
+        message += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
         message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
         
         if lower and price <= lower:
@@ -329,10 +330,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['show_price_active'] = False
         
         await query.edit_message_text(
-            "╔════════════════════════════════════╗\n"
-            "║   📍 ВСТАНОВИ ЦІЛЬОВІ ЦІНИ       ║\n"
-            "╚════════════════════════════════════╝\n\n"
-            "Введи <b>МІНІМАЛЬНУ ціну</b> (нижня границя):",
+            "📍 <b>Встановити цільові ціни</b>\n\n"
+            "Введи <b>мінімальну ціну</b> (нижня границя):",
             parse_mode="HTML"
         )
         return SET_LOWER
@@ -358,15 +357,11 @@ async def show_targets(query, context):
     upper = context.user_data.get('upper_price')
     
     if not lower and not upper:
-        message = "╔════════════════════════════════════╗\n"
-        message += "║   ⚙️ МОЇ ЦІЛЬОВІ ЦІНИ             ║\n"
-        message += "╚════════════════════════════════════╝\n\n"
+        message = "⚙️ <b>Мої цільові ціни</b>\n\n"
         message += "❌ Ти ще не встановив цільові ціни.\n\n"
         message += "📍 Натисни '<b>Встановити ціль</b>' для додавання."
     else:
-        message = "╔════════════════════════════════════╗\n"
-        message += "║   ⚙️ МОЇ ЦІЛЬОВІ ЦІНИ             ║\n"
-        message += "╚════════════════════════════════════╝\n\n"
+        message = "⚙️ <b>Мої цільові ціни</b>\n\n"
         if lower:
             message += f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
         if upper:
@@ -389,12 +384,7 @@ async def send_main_menu(query, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message_text = (
-        "╔════════════════════════════════════╗\n"
-        "║   🏠 ГОЛОВНЕ МЕНЮ                 ║\n"
-        "╚════════════════════════════════════╝\n\n"
-        "✨ <b>Вибери дію:</b>"
-    )
+    message_text = "🏠 <b>Головне меню</b>"
     
     await query.edit_message_text(
         message_text,
@@ -445,9 +435,7 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
             pass
         
         message = (
-            "╔════════════════════════════════════╗\n"
-            "║   ✅ ЦІЛЬОВІ ЦІНИ ВСТАНОВЛЕНІ!   ║\n"
-            "╚════════════════════════════════════╝\n\n"
+            "✅ <b>Цільові ціни встановлені!</b>\n\n"
             f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
             f"📍 <b>Верхня границя:</b> <code>${upper_price:,.2f}</code>\n\n"
             "🔔 <b>Моніторинг активний!</b>\n"
