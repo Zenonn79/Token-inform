@@ -57,9 +57,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "👋 Вітаю в ETH Price Monitor!\n\n"
+        "👋 <b>Вітаю в ETH Price Monitor!</b>\n\n"
         "Я буду слідкувати за курсом Ефіра і повідомлю тебе, коли він досягне твоїх цільових цін.",
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode="HTML"
     )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70,7 +71,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "show_price":
         await show_current_price(query, context)
     elif query.data == "set_target":
-        await query.edit_message_text("📍 Встановити цільові ціни:\n\nВведи мінімальну ціну (нижня границя):")
+        await query.edit_message_text(
+            "📍 <b>Встановити цільові ціни</b>\n\n"
+            "Введи <b>мінімальну ціну</b> (нижня границя):",
+            parse_mode="HTML"
+        )
         return SET_LOWER
     elif query.data == "show_targets":
         await show_targets(query, context)
@@ -86,23 +91,28 @@ async def show_current_price(query, context):
     price = await get_eth_price()
     
     if price:
-        message = f"💰 Поточний курс Ефіра:\n\n${price:,.2f}\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        
-        # Перевіряємо, чи перевищений нижній або верхній показник
         lower = context.user_data.get('lower_price')
         upper = context.user_data.get('upper_price')
         
+        # Основне повідомлення
+        message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
+        message += f"<code>${price:,.2f}</code>\n\n"
+        message += f"<i>⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
+        
+        # Додаємо сигнали
         if lower and price <= lower:
-            message += f"\n\n🔴 СИГНАЛ: Ціна досягла нижнього показника ${lower}!"
+            message += f"\n\n🔴 <b>СИГНАЛ!</b>\n"
+            message += f"Ціна досягла нижнього показника ${lower}"
         if upper and price >= upper:
-            message += f"\n\n🟢 СИГНАЛ: Ціна досягла верхнього показника ${upper}!"
+            message += f"\n\n🟢 <b>СИГНАЛ!</b>\n"
+            message += f"Ціна досягла верхнього показника ${upper}"
     else:
         message = "❌ Не вдалося отримати курс. Спробуй пізніше."
     
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup)
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_targets(query, context):
     """Показує встановлені цільові ціни"""
@@ -110,19 +120,21 @@ async def show_targets(query, context):
     upper = context.user_data.get('upper_price')
     
     if not lower and not upper:
-        message = "📋 Ти ще не встановив цільові ціни.\n\nНатисни 'Встановити ціль', щоб додати їх."
+        message = "📋 <b>Твої цільові ціни</b>\n\n"
+        message += "Ти ще не встановив цільові ціни.\n\n"
+        message += "Натисни <b>'📍 Встановити ціль'</b>, щоб додати їх."
     else:
-        message = "📋 Твої цільові ціни:\n\n"
+        message = "📋 <b>Твої цільові ціни</b>\n\n"
         if lower:
-            message += f"📍 Нижня границя: ${lower:,.2f}\n"
+            message += f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
         if upper:
-            message += f"📍 Верхня границя: ${upper:,.2f}\n"
-        message += "\n💡 Бот подасть сигнал, коли ціна досягне однієї з цих позначок."
+            message += f"📍 <b>Верхня границя:</b> <code>${upper:,.2f}</code>\n"
+        message += f"\n💡 Бот подасть сигнал, коли ціна досягне однієї з цих позначок."
     
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup)
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
 
 async def send_main_menu(query, context):
     """Відправляє головне меню"""
@@ -135,8 +147,9 @@ async def send_main_menu(query, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "🏠 Головне меню:",
-        reply_markup=reply_markup
+        "🏠 <b>Головне меню</b>",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
     )
 
 async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,12 +159,18 @@ async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['lower_price'] = lower_price
         
         await update.message.reply_text(
-            f"✅ Нижня границя встановлена: ${lower_price:,.2f}\n\n"
-            "Тепер введи верхню ціну (верхня границя):"
+            f"✅ <b>Нижня границя встановлена:</b> <code>${lower_price:,.2f}</code>\n\n"
+            "Тепер введи верхню ціну <b>(верхня границя):</b>",
+            parse_mode="HTML"
         )
         return SET_UPPER
     except ValueError:
-        await update.message.reply_text("❌ Будь ласка, введи коректне число (наприклад: 2500 або 2500.50)")
+        await update.message.reply_text(
+            "❌ <b>Помилка!</b>\n\n"
+            "Будь ласка, введи коректне число\n"
+            "<i>Приклад: 2500 або 2500.50</i>",
+            parse_mode="HTML"
+        )
         return SET_LOWER
 
 async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,10 +183,11 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lower = context.user_data.get('lower_price')
         
         message = (
-            f"✅ Цільові ціни встановлені:\n\n"
-            f"📍 Нижня границя: ${lower:,.2f}\n"
-            f"📍 Верхня границя: ${upper_price:,.2f}\n\n"
-            f"🔔 Я буду сигналізувати, коли ціна Ефіра досягне однієї з цих позначок!"
+            f"✅ <b>Цільові ціни встановлені!</b>\n\n"
+            f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
+            f"📍 <b>Верхня границя:</b> <code>${upper_price:,.2f}</code>\n\n"
+            f"🔔 <b>Моніторинг активний!</b>\n"
+            f"Я буду сигналізувати, коли ціна Ефіра досягне однієї з цих позначок."
         )
         
         # Запускаємо фоновий моніторинг
@@ -182,10 +202,15 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(message, reply_markup=reply_markup)
+        await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ Будь ласка, введи коректне число (наприклад: 3000 або 3000.50)")
+        await update.message.reply_text(
+            "❌ <b>Помилка!</b>\n\n"
+            "Будь ласка, введи коректне число\n"
+            "<i>Приклад: 3000 або 3000.50</i>",
+            parse_mode="HTML"
+        )
         return SET_UPPER
 
 async def monitor_price(user_id, context: ContextTypes.DEFAULT_TYPE):
@@ -205,11 +230,12 @@ async def monitor_price(user_id, context: ContextTypes.DEFAULT_TYPE):
                 if lower and price <= lower and not last_notified_lower:
                     await context.bot.send_message(
                         user_id,
-                        f"🔴 СИГНАЛ! 🔴\n\n"
-                        f"Курс Ефіра досягнув нижнього показника!\n\n"
-                        f"💰 Поточна ціна: ${price:,.2f}\n"
-                        f"📍 Твоя ціль: ${lower:,.2f}\n\n"
-                        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        f"🔴 <b>СИГНАЛ!</b> 🔴\n\n"
+                        f"<b>Курс Ефіра досягнув нижнього показника!</b>\n\n"
+                        f"💰 <b>Поточна ціна:</b> <code>${price:,.2f}</code>\n"
+                        f"📍 <b>Твоя ціль:</b> <code>${lower:,.2f}</code>\n\n"
+                        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                        parse_mode="HTML"
                     )
                     last_notified_lower = True
                 elif price > lower * 1.05:  # Якщо ціна повернулась вище, готуємо до нового сигналу
@@ -219,11 +245,12 @@ async def monitor_price(user_id, context: ContextTypes.DEFAULT_TYPE):
                 if upper and price >= upper and not last_notified_upper:
                     await context.bot.send_message(
                         user_id,
-                        f"🟢 СИГНАЛ! 🟢\n\n"
-                        f"Курс Ефіра досягнув верхнього показника!\n\n"
-                        f"💰 Поточна ціна: ${price:,.2f}\n"
-                        f"📍 Твоя ціль: ${upper:,.2f}\n\n"
-                        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        f"🟢 <b>СИГНАЛ!</b> 🟢\n\n"
+                        f"<b>Курс Ефіра досягнув верхнього показника!</b>\n\n"
+                        f"💰 <b>Поточна ціна:</b> <code>${price:,.2f}</code>\n"
+                        f"📍 <b>Твоя ціль:</b> <code>${upper:,.2f}</code>\n\n"
+                        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                        parse_mode="HTML"
                     )
                     last_notified_upper = True
                 elif price < upper * 0.95:  # Якщо ціна повернулась нижче, готуємо до нового сигналу
