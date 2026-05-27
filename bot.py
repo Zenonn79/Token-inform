@@ -73,13 +73,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
-    """Автоматично оновлює ціну кожні 5 секунд"""
+    """Автоматично оновлює ціну кожні 10 секунд, тільки якщо вона змінилась"""
     try:
         message_id = query.message.message_id
         chat_id = query.message.chat_id
+        last_price = None
+        last_signal = None
         
         while context.user_data.get('show_price_active', False):
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)  # Чекаємо 10 секунд замість 5
             
             # Перевіряємо, чи ще користувач у екрані показу ціни
             if not context.user_data.get('show_price_active'):
@@ -92,36 +94,58 @@ async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
                     lower = context.user_data.get('lower_price')
                     upper = context.user_data.get('upper_price')
                     
-                    # Основне повідомлення
-                    message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
-                    message += f"<code>${price:,.2f}</code>\n\n"
-                    message += f"<i>⏰ {datetime.now().strftime('%H:%M:%S')}</i>\n"
-                    message += "🔄 <i>(оновлюється кожні 5 сек)</i>"
-                    
-                    # Додаємо сигнали
+                    # Перевіряємо, чи змінилась ціна (з точністю до 2 знаків)
+                    current_signal = None
                     if lower and price <= lower:
-                        message += f"\n\n🔴 <b>СИГНАЛ!</b>\n"
-                        message += f"Ціна досягла нижнього показника ${lower}"
-                    if upper and price >= upper:
-                        message += f"\n\n🟢 <b>СИГНАЛ!</b>\n"
-                        message += f"Ціна досягла верхнього показника ${upper}"
+                        current_signal = "lower"
+                    elif upper and price >= upper:
+                        current_signal = "upper"
+                    
+                    # Оновлюємо тільки якщо:
+                    # 1. Ціна змінилась на більше ніж 0.01
+                    # 2. Або з'явився новий сигнал
+                    if last_price is None or abs(price - last_price) >= 0.01 or current_signal != last_signal:
+                        # Основне повідомлення
+                        message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
+                        message += f"<code>${price:,.2f}</code>\n\n"
+                        message += f"<i>⏰ {datetime.now().strftime('%H:%M:%S')}</i>\n"
+                        message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
+                        
+                        # Додаємо сигнали
+                        if lower and price <= lower:
+                            message += f"\n\n🔴 <b>СИГНАЛ!</b>\n"
+                            message += f"Ціна досягла нижнього показника ${lower}"
+                        if upper and price >= upper:
+                            message += f"\n\n🟢 <b>СИГНАЛ!</b>\n"
+                            message += f"Ціна досягла верхнього показника ${upper}"
+                        
+                        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
+                        # Редагуємо повідомлення
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text=message,
+                                reply_markup=reply_markup,
+                                parse_mode="HTML"
+                            )
+                            last_price = price
+                            last_signal = current_signal
+                        except Exception as e:
+                            if "not modified" not in str(e).lower():
+                                logger.error(f"Помилка при оновленні ціни: {e}")
+                                break
                 else:
-                    message = "❌ Не вдалося отримати курс. Спробуй пізніше."
-                
-                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                # Редагуємо повідомлення
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"Помилка при оновленні ціни: {e}")
+                    logger.error("Не вдалося отримати ціну ETH")
+                    
+            except asyncio.CancelledError:
                 break
+            except Exception as e:
+                logger.error(f"Помилка в циклі оновлення: {e}")
+                break
+                
     except Exception as e:
         logger.error(f"Помилка в auto_update_price: {e}")
 
@@ -140,7 +164,7 @@ async def show_current_price(query, context):
         message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
         message += f"<code>${price:,.2f}</code>\n\n"
         message += f"<i>⏰ {datetime.now().strftime('%H:%M:%S')}</i>\n"
-        message += "🔄 <i>(оновлюється кожні 5 сек)</i>"
+        message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
         
         # Додаємо сигнали
         if lower and price <= lower:
