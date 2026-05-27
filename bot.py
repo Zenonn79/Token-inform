@@ -78,6 +78,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['monitoring'] = False
         await query.edit_message_text("⏹️ Моніторинг зупинено.")
         await send_main_menu(query, context)
+    elif query.data == "back_menu":
+        await send_main_menu(query, context)
 
 async def show_current_price(query, context):
     """Показує поточний курс ETH"""
@@ -256,7 +258,7 @@ def main():
     # Обробники
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(CallbackQueryHandler(button_handler, pattern="^(show_price|show_targets|stop_monitoring|back_menu)$"))
+    application.add_handler(CallbackQueryHandler(button_handler))
     
     # Запускаємо бот
     application.run_polling(allowed_updates=Update.ALL_TYPES)
