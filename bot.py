@@ -47,7 +47,16 @@ async def get_eth_price():
     return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
+    """Команда /start - видаляє старі повідомлення і показує меню"""
+    # Видаляємо старе повідомлення якщо воно було
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id - 1
+        )
+    except:
+        pass
+    
     keyboard = [
         [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
         [InlineKeyboardButton("📍 Встановити ціль", callback_data="set_target")],
@@ -63,31 +72,64 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє натискання кнопок"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "show_price":
-        await show_current_price(query, context)
-    elif query.data == "set_target":
-        await query.edit_message_text(
-            "📍 <b>Встановити цільові ціни</b>\n\n"
-            "Введи <b>мінімальну ціну</b> (нижня границя):",
-            parse_mode="HTML"
-        )
-        return SET_LOWER
-    elif query.data == "show_targets":
-        await show_targets(query, context)
-    elif query.data == "stop_monitoring":
-        context.user_data['monitoring'] = False
-        await query.edit_message_text("⏹️ Моніторинг зупинено.")
-        await send_main_menu(query, context)
-    elif query.data == "back_menu":
-        await send_main_menu(query, context)
+async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
+    """Автоматично оновлює ціну кожні 5 секунд"""
+    try:
+        message_id = query.message.message_id
+        chat_id = query.message.chat_id
+        
+        while context.user_data.get('show_price_active', False):
+            await asyncio.sleep(5)
+            
+            # Перевіряємо, чи ще користувач у екрані показу ціни
+            if not context.user_data.get('show_price_active'):
+                break
+            
+            try:
+                price = await get_eth_price()
+                
+                if price:
+                    lower = context.user_data.get('lower_price')
+                    upper = context.user_data.get('upper_price')
+                    
+                    # Основне повідомлення
+                    message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
+                    message += f"<code>${price:,.2f}</code>\n\n"
+                    message += f"<i>⏰ {datetime.now().strftime('%H:%M:%S')}</i>\n"
+                    message += "🔄 <i>(оновлюється кожні 5 сек)</i>"
+                    
+                    # Додаємо сигнали
+                    if lower and price <= lower:
+                        message += f"\n\n🔴 <b>СИГНАЛ!</b>\n"
+                        message += f"Ціна досягла нижнього показника ${lower}"
+                    if upper and price >= upper:
+                        message += f"\n\n🟢 <b>СИГНАЛ!</b>\n"
+                        message += f"Ціна досягла верхнього показника ${upper}"
+                else:
+                    message = "❌ Не вдалося отримати курс. Спробуй пізніше."
+                
+                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Редагуємо повідомлення
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=message,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Помилка при оновленні ціни: {e}")
+                break
+    except Exception as e:
+        logger.error(f"Помилка в auto_update_price: {e}")
 
 async def show_current_price(query, context):
-    """Показує поточний курс ETH"""
+    """Показує поточний курс ETH з автооновленням"""
+    # Зупиняємо попереднє оновлення, якщо воно було
+    context.user_data['show_price_active'] = True
+    
     price = await get_eth_price()
     
     if price:
@@ -97,7 +139,8 @@ async def show_current_price(query, context):
         # Основне повідомлення
         message = f"<b>💰 Поточний курс Ефіра</b>\n\n"
         message += f"<code>${price:,.2f}</code>\n\n"
-        message += f"<i>⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
+        message += f"<i>⏰ {datetime.now().strftime('%H:%M:%S')}</i>\n"
+        message += "🔄 <i>(оновлюється кожні 5 сек)</i>"
         
         # Додаємо сигнали
         if lower and price <= lower:
@@ -112,7 +155,52 @@ async def show_current_price(query, context):
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
+    try:
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Помилка при оновленні повідомлення: {e}")
+    
+    # Запускаємо автооновлення кожні 5 секунд
+    context.application.create_task(
+        auto_update_price(query, context)
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробляє натискання кнопок"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "show_price":
+        await show_current_price(query, context)
+    elif query.data == "set_target":
+        # Зупиняємо оновлення ціни
+        context.user_data['show_price_active'] = False
+        
+        await query.edit_message_text(
+            "📍 <b>Встановити цільові ціни</b>\n\n"
+            "Введи <b>мінімальну ціну</b> (нижня границя):",
+            parse_mode="HTML"
+        )
+        return SET_LOWER
+    elif query.data == "show_targets":
+        # Зупиняємо оновлення ціни
+        context.user_data['show_price_active'] = False
+        
+        await show_targets(query, context)
+    elif query.data == "stop_monitoring":
+        context.user_data['monitoring'] = False
+        context.user_data['show_price_active'] = False
+        
+        await query.edit_message_text(
+            "⏹️ <b>Моніторинг зупинено.</b>",
+            parse_mode="HTML"
+        )
+        await send_main_menu(query, context)
+    elif query.data == "back_menu":
+        # Зупиняємо оновлення ціни
+        context.user_data['show_price_active'] = False
+        
+        await send_main_menu(query, context)
 
 async def show_targets(query, context):
     """Показує встановлені цільові ціни"""
