@@ -108,7 +108,7 @@ async def global_price_monitor(application: Application):
                 current_eth_price = price
                 global_price_history.append((now, price))
                 
-                # Очищення старого кешу (залишаємо лише за останні 24 години, щоб не переповнювати пам'ять)
+                # Очищення старого кешу (залишаємо лише за останні 24 години)
                 global_price_history = [item for item in global_price_history if (now - item[0]).total_seconds() < 86400]
                 
                 # Перевірка лімітів користувачів
@@ -129,7 +129,7 @@ async def global_price_monitor(application: Application):
                         )
                         user_data['notified_lower'] = True
                     elif lower and price > lower * 1.01:
-                        user_data['notified_lower'] = False  # Скидання флагу сповіщення
+                        user_data['notified_lower'] = False
                         
                     # Перевірка верхньої межі
                     if upper and price >= upper and not user_data.get('notified_upper', False):
@@ -140,7 +140,7 @@ async def global_price_monitor(application: Application):
                         )
                         user_data['notified_upper'] = True
                     elif upper and price < upper * 0.99:
-                        user_data['notified_upper'] = False  # Скидання флагу сповіщення
+                        user_data['notified_upper'] = False
 
         except Exception as e:
             logger.error(f"Помилка в циклі моніторингу: {e}")
@@ -162,7 +162,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     active_users.add(user_id)
     
-    # Спробуємо видалити текстову команду користувача /start, щоб очистити чат
     if update.message:
         try:
             await update.message.delete()
@@ -183,7 +182,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_users.add(user_id)
 
     if query.data == "show_price":
-        # Замість запиту до API беремо миттєве значення з нашого 5-секундного потоку
         if current_eth_price:
             msg = f"💰 <b>Поточний курс ETH</b>\n\n<code>${current_eth_price:,.2f}</code>\n\n⏰ Оновлено: {get_current_time().strftime('%H:%M:%S')}"
         else:
@@ -198,7 +196,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
             await query.edit_message_text("📈 <b>Недостатньо даних для графіка</b>\n\nЗачекайте кілька хвилин, поки назбирається історія (мін. 2 точки).", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         else:
-            # Графік надсилається новим повідомленням (фото), а старе меню видаляємо
             try:
                 await query.message.delete()
             except:
@@ -236,7 +233,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 5 секунд.", reply_markup=get_menu_keyboard(), parse_mode="HTML")
 
     elif query.data == "back_from_chart":
-        # Якщо ми повертаємось від графіка (який є Photo), видаляємо фото та створюємо чисте меню текстовим повідомленням
         try:
             await query.message.delete()
         except:
@@ -248,7 +244,9 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    # Текст замінює головне меню, уникаючи захаращення чату
+    # Зберігаємо ID повідомлення-меню, яке ми щойно відредагували
+    context.user_data['conv_menu_msg_id'] = query.message.message_id
+    
     await query.edit_message_text("📍 <b>Встановлення цілей</b>\n\nВведіть <b>мінімальну ціну</b> (або 0, якщо не потрібна):", parse_mode="HTML")
     return SET_LOWER
 
@@ -258,19 +256,27 @@ async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['lower_price'] = val if val > 0 else None
         context.user_data['notified_lower'] = False
         
+        # Видаляємо введену користувачем цифру
         try:
-            await update.message.delete()  # Видаляємо цифру користувача
+            await update.message.delete()
         except:
             pass
             
-        # Замість відправки нового повідомлення, ми надсилаємо нове, але згодом його також перекриємо
-        context.user_data['last_conv_msg'] = await update.message.reply_text(
-            f"✅ Нижня межа: " + (f"${val:,.2f}" if val > 0 else "Вимкнено") + f"\n\nТепер введіть <b>максимальну ціну</b> (або 0):",
-            parse_mode="HTML"
-        )
+        # Замість надсилання нового повідомлення, РЕДАГУЄМО початкове меню розмови
+        chat_id = update.effective_chat.id
+        msg_id = context.user_data.get('conv_menu_msg_id')
+        
+        lower_status = f"${val:,.2f}" if val > 0 else "Вимкнено"
+        text = f"✅ Нижня межа: {lower_status}\n\nТепер введіть <b>максимальну ціну</b> (або 0):"
+        
+        if msg_id:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, parse_mode="HTML")
+            
         return SET_UPPER
     except ValueError:
-        await update.message.reply_text("❌ Будь ласка, введіть коректне число! Спробуйте ще раз:")
+        # Тимчасове повідомлення про помилку, яке згодом затреться автоматично
+        err_msg = await update.message.reply_text("❌ Будь ласка, введіть коректне число! Спробуйте ще раз:")
+        context.user_data['last_err_msg_id'] = err_msg.message_id
         return SET_LOWER
 
 async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,34 +285,46 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['upper_price'] = val if val > 0 else None
         context.user_data['notified_upper'] = False
         
+        # Видаляємо введену користувачем цифру
         try:
             await update.message.delete()
         except:
             pass
             
-        # Видаляємо проміжне повідомлення з кроку 1, якщо воно збереглось
-        if 'last_conv_msg' in context.user_data:
+        # Якщо до цього вискакувала помилка введення — видаляємо її
+        if 'last_err_msg_id' in context.user_data:
             try:
-                await context.user_data['last_conv_msg'].delete()
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data['last_err_msg_id'])
             except:
                 pass
-        
+
+        # Редагуємо наше основне діалогове повідомлення, перетворюючи його на фінал розмови
+        chat_id = update.effective_chat.id
+        msg_id = context.user_data.get('conv_menu_msg_id')
         lower = context.user_data.get('lower_price')
-        await update.message.reply_text(
+        
+        text = (
             f"🎯 <b>Цілі успішно оновлені!</b>\n\n"
             f"🔴 Мін: " + (f"${lower:,.2f}" if lower else "немає") + f"\n"
             f"🟢 Макс: " + (f"${val:,.2f}" if val > 0 else "немає") + f"\n\n"
-            f"Бот автоматично надішле повідомлення у разі пробиття.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="back_from_chart")]]),
-            parse_mode="HTML"
+            f"Бот автоматично сповістить вас у разі пробиття меж."
         )
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="back_from_chart")]])
+        
+        if msg_id:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            # Якщо раптом id втрачено (малоймовірно) — надсилаємо нове
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+            
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ Будь ласка, введіть коректне число. Спробуйте ще раз:")
+        err_msg = await update.message.reply_text("❌ Будь ласка, введіть коректне число. Спробуйте ще раз:")
+        context.user_data['last_err_msg_id'] = err_msg.message_id
         return SET_UPPER
 
 async def handle_unknown_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Видаляє випадковий текст від користувача поза меню та викликає свіже меню"""
+    """Очищення випадкового тексту та виклик свіжого меню"""
     try:
         await update.message.delete()
     except:
@@ -316,7 +334,6 @@ async def handle_unknown_messages(update: Update, context: ContextTypes.DEFAULT_
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Окремий хендлер розмови для встановлення меж цен
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_conversation, pattern="set_target")],
         states={
@@ -331,13 +348,12 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown_messages))
     
-    # Ініціалізація фонового моніторингу через post_init
     async def startup(app):
         asyncio.create_task(global_price_monitor(app))
         
     application.post_init = startup
     
-    logger.info("Бот успішно запущений. Очікування оновлень...")
+    logger.info("Бот успішно запущений.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
