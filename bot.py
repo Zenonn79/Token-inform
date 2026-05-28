@@ -145,7 +145,7 @@ async def global_price_monitor(application: Application):
         except Exception as e:
             logger.error(f"Помилка в циклі моніторингу: {e}")
             
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
 
 def get_menu_keyboard():
     keyboard = [
