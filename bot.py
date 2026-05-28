@@ -62,25 +62,21 @@ def create_price_chart(lower_target=None, upper_target=None):
             
         today_str = get_current_time().strftime('%Y-%m-%d')
         
-        # Фільтруємо точки лише за сьогодні
         times = [t.strftime('%H:%M:%S') for t, p in global_price_history if t.strftime('%Y-%m-%d') == today_str]
         prices = [p for t, p in global_price_history if t.strftime('%Y-%m-%d') == today_str]
         
         if len(prices) < 2:
             return None
 
-        # Рахуємо мін/макс зафіксовані за сьогодні
         min_today = min(prices)
         max_today = max(prices)
 
         fig, ax = plt.subplots(figsize=(10, 5.5), facecolor='#2b2d31')
         ax.set_facecolor('#1e1f22')
         
-        # Малюємо основну лінію графіка
         ax.plot(times, prices, color='#5865f2', linewidth=2.5, marker='o', markersize=4, label='Курс ETH')
         ax.fill_between(range(len(prices)), prices, min(prices) - 10, alpha=0.15, color='#5865f2')
         
-        # Додаємо лінії цілей користувача, якщо вони задані
         if lower_target:
             ax.axhline(y=lower_target, color='#ed4245', linestyle='--', linewidth=1.5, label=f'Ціль Мін: ${lower_target:,.2f}')
         if upper_target:
@@ -89,17 +85,15 @@ def create_price_chart(lower_target=None, upper_target=None):
         ax.set_xlabel('Час', color='#b5bac1', fontsize=10)
         ax.set_ylabel('Ціна (USD)', color='#b5bac1', fontsize=10)
         
-        # Формуємо інформативний заголовок зі статистикою екстремумів
         title_text = (
             f"📈 Історія цін Ефіра (сьогодні)\n"
-            f"Min за день: ${min_today:,.2f}  |  Max за день: ${max_today:,.2f}"
+            f"Min за день: ${min_today:,.2f}  |  Max за day: ${max_today:,.2f}"
         )
         ax.set_title(title_text, color='#ffffff', fontsize=11, fontweight='bold', pad=12)
         
         ax.grid(True, alpha=0.15, color='#4f545c')
         ax.tick_params(colors='#b5bac1')
         
-        # Додаємо легенду, щоб відрізняти лінії меж
         ax.legend(loc='upper left', facecolor='#1e1f22', edgecolor='#4f545c', labelcolor='#ffffff', fontsize=9)
         
         ax.xaxis.set_major_locator(plt.MaxNLocator(8))
@@ -116,7 +110,7 @@ def create_price_chart(lower_target=None, upper_target=None):
         return None
 
 async def global_price_monitor(application: Application):
-    """Глобальний моніторинг ціни кожні 10 секунд (з автооновленням активних екранів)"""
+    """Глобальний моніторинг ціни кожні 10 секунд"""
     global current_eth_price, global_price_history
     
     while True:
@@ -128,16 +122,13 @@ async def global_price_monitor(application: Application):
                 current_eth_price = price
                 global_price_history.append((now, price))
                 
-                # Очищення старого кешу (залишаємо лише за останні 24 години)
                 global_price_history = [item for item in global_price_history if (now - item[0]).total_seconds() < 86400]
                 
-                # Обробка користувачів (ліміти + «живе» оновлення екрана)
                 for user_id in list(active_users):
                     user_data = application.user_data.get(user_id)
                     if not user_data:
                         continue
                     
-                    # Живе оновлення екрану поточного курсу
                     active_price_msg_id = user_data.get('active_price_msg_id')
                     if active_price_msg_id:
                         try:
@@ -154,7 +145,6 @@ async def global_price_monitor(application: Application):
                         except:
                             pass
 
-                    # Перевірка лімітів користувачів
                     lower = user_data.get('lower_price')
                     upper = user_data.get('upper_price')
                     
@@ -233,11 +223,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        return ConversationHandler.END  # Скидаємо розмову, якщо вона була активна
 
     elif query.data == "show_chart":
         context.user_data['active_price_msg_id'] = None
         
-        # Передаємо поточні межі користувача у побудову графіка
         lower_target = context.user_data.get('lower_price')
         upper_target = context.user_data.get('upper_price')
         
@@ -253,7 +243,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
             
-            # Текстовий підпис до фото з детальною аналітикою
             caption_text = (
                 f"📊 <b>Аналітика за сьогодні:</b>\n"
                 f"🔹 Найнижча фіксація: <code>${min_today:,.2f}</code>\n"
@@ -270,6 +259,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
+        return ConversationHandler.END
 
     elif query.data == "show_targets":
         context.user_data['active_price_msg_id'] = None
@@ -283,6 +273,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        return ConversationHandler.END
 
     elif query.data == "stop":
         context.user_data['active_price_msg_id'] = None
@@ -293,10 +284,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text("⏹️ Усі цілі видалено. Моніторинг меж вимкнено.", reply_markup=InlineKeyboardMarkup(keyboard))
+        return ConversationHandler.END
 
     elif query.data == "back":
         context.user_data['active_price_msg_id'] = None
         await query.edit_message_text("🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.", reply_markup=get_menu_keyboard(), parse_mode="HTML")
+        return ConversationHandler.END
 
     elif query.data == "back_from_chart":
         context.user_data['active_price_msg_id'] = None
@@ -305,6 +298,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
         await query.message.reply_text("🚀 <b>ETH Price Monitor</b>", reply_markup=get_menu_keyboard(), parse_mode="HTML")
+        return ConversationHandler.END
 
 async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Початок діалогу встановлення меж ціни"""
@@ -399,7 +393,12 @@ def main():
             SET_LOWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_lower_price)],
             SET_UPPER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_upper_price)],
         },
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[
+            # Якщо користувач кинув розмову на півдорозі й натиснув іншу кнопку,
+            # розмова закриється самостійно, а кнопка обробиться як треба
+            CallbackQueryHandler(button_handler)
+        ],
+        allow_reentry=True  # Дозволяє повторно увійти в "Встановити цілі", скидаючи старий стан
     )
     
     application.add_handler(CommandHandler("start", start))
