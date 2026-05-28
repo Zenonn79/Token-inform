@@ -87,7 +87,7 @@ def create_price_chart(lower_target=None, upper_target=None):
         
         title_text = (
             f"📈 Історія цін Ефіра (сьогодні)\n"
-            f"Min за день: ${min_today:,.2f}  |  Max за day: ${max_today:,.2f}"
+            f"Min за день: ${min_today:,.2f}  |  Max за день: ${max_today:,.2f}"
         )
         ax.set_title(title_text, color='#ffffff', fontsize=11, fontweight='bold', pad=12)
         
@@ -110,7 +110,7 @@ def create_price_chart(lower_target=None, upper_target=None):
         return None
 
 async def global_price_monitor(application: Application):
-    """Глобальний моніторинг ціни кожні 10 секунд"""
+    """Глобальний моніторинг ціни кожні 10 секунд та аналіз імпульсів зміни ціни"""
     global current_eth_price, global_price_history
     
     while True:
@@ -129,6 +129,7 @@ async def global_price_monitor(application: Application):
                     if not user_data:
                         continue
                     
+                    # --- 1. Живе оновлення екрану поточного курсу ---
                     active_price_msg_id = user_data.get('active_price_msg_id')
                     if active_price_msg_id:
                         try:
@@ -145,13 +146,46 @@ async def global_price_monitor(application: Application):
                         except:
                             pass
 
+                    # --- 2. Логіка імпульсних сповіщень (зміна на 2%) ---
+                    ref_price = user_data.get('reference_price')
+                    if ref_price is None:
+                        # Якщо бот щойно запустився або користувач новий, фіксуємо поточну ціну як першу опорну
+                        user_data['reference_price'] = price
+                    else:
+                        # Рахуємо відсоткову зміну від опорної ціни
+                        percent_change = ((price - ref_price) / ref_price) * 100
+                        
+                        if abs(percent_change) >= 2.0:
+                            # Визначаємо емодзі та текст залежно від напрямку руху
+                            if percent_change > 0:
+                                emoji, trend_str = "🚀 <b>ІМПУЛЬС ВГОРУ!</b>", "зросла"
+                            else:
+                                emoji, trend_str = "⚠️ <b>ІМПУЛЬС ВНИЗ!</b>", "впала"
+                                
+                            alert_msg = (
+                                f"{emoji}\n\n"
+                                f"Ціна ETH {trend_str} на <b>{abs(percent_change):.2f}%</b>\n"
+                                f"Попередня опорна: <code>${ref_price:,.2f}</code>\n"
+                                f"Поточна ціна: <b>${price:,.2f}</b>\n\n"
+                                f"📌 <i>Цю ціну (${price:,.2f}) зафіксовано як нову опорну точку.</i>"
+                            )
+                            
+                            try:
+                                await application.bot.send_message(user_id, alert_msg, parse_mode="HTML")
+                            except Exception as send_err:
+                                logger.error(f"Не вдалося надіслати імпульсне сповіщення: {send_err}")
+                                
+                            # Оновлюємо опорну ціну: поточний курс стає новим орієнтиром
+                            user_data['reference_price'] = price
+
+                    # --- 3. Перевірка статичних лімітів користувачів (Мін/Макс) ---
                     lower = user_data.get('lower_price')
                     upper = user_data.get('upper_price')
                     
                     if lower and price <= lower and not user_data.get('notified_lower', False):
                         await application.bot.send_message(
                             user_id,
-                            f"🔴 <b>СИГНАЛ! Ціна впала!</b>\n\nЦільова: {lower}\nПоточна: <b>${price:,.2f}</b>",
+                            f"🔴 <b>СИГНАЛ! Ціна впала нижче межі!</b>\n\nЦільова: {lower}\nПоточна: <b>${price:,.2f}</b>",
                             parse_mode="HTML"
                         )
                         user_data['notified_lower'] = True
@@ -161,7 +195,7 @@ async def global_price_monitor(application: Application):
                     if upper and price >= upper and not user_data.get('notified_upper', False):
                         await application.bot.send_message(
                             user_id,
-                            f"🟢 <b>СИГНАЛ! Ціна зросла!</b>\n\nЦільова: {upper}\nПоточна: <b>${price:,.2f}</b>",
+                            f"🟢 <b>СИГНАЛ! Ціна зросла вище межі!</b>\n\nЦільова: {upper}\nПоточна: <b>${price:,.2f}</b>",
                             parse_mode="HTML"
                         )
                         user_data['notified_upper'] = True
@@ -189,13 +223,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_users.add(user_id)
     context.user_data['active_price_msg_id'] = None
     
+    # Примусово скидаємо/оновлюємо опорну ціну при старті, якщо хочеться свіжого відліку
+    if 'reference_price' not in context.user_data and current_eth_price:
+        context.user_data['reference_price'] = current_eth_price
+        
     if update.message:
         try:
             await update.message.delete()
         except:
             pass
         await update.message.reply_text(
-            "🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.",
+            "🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.\nАвтоматично сповіщаю про коливання ринку на ±2%.",
             reply_markup=get_menu_keyboard(),
             parse_mode="HTML"
         )
@@ -223,13 +261,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        return ConversationHandler.END  # Скидаємо розмову, якщо вона була активна
+        return ConversationHandler.END
 
     elif query.data == "show_chart":
         context.user_data['active_price_msg_id'] = None
         
         lower_target = context.user_data.get('lower_price')
         upper_target = context.user_data.get('upper_price')
+        ref_price = context.user_data.get('reference_price')
         
         chart_data = create_price_chart(lower_target, upper_target)
         
@@ -246,7 +285,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption_text = (
                 f"📊 <b>Аналітика за сьогодні:</b>\n"
                 f"🔹 Найнижча фіксація: <code>${min_today:,.2f}</code>\n"
-                f"🔸 Найвища фіксація: <code>${max_today:,.2f}</code>\n\n"
+                f"🔸 Найвища фіксація: <code>${max_today:,.2f}</code>\n"
+                f"📍 Поточна опорна ціна: " + (f"<code>${ref_price:,.2f}</code>" if ref_price else "не зафіксована") + "\n\n"
                 f"🎯 <b>Ваші цілі:</b>\n"
                 f"🔴 Нижній поріг: " + (f"<code>${lower_target:,.2f}</code>" if lower_target else "не вказано") + "\n"
                 f"🟢 Верхній поріг: " + (f"<code>${upper_target:,.2f}</code>" if upper_target else "не вказано")
@@ -265,11 +305,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['active_price_msg_id'] = None
         lower = context.user_data.get('lower_price')
         upper = context.user_data.get('upper_price')
+        ref = context.user_data.get('reference_price')
         
-        if not lower and not upper:
-            msg = "❌ Сповіщення не налаштовані."
-        else:
-            msg = f"📍 <b>Ваші встановлені межі:</b>\n\n🔴 Мін: " + (f"${lower:,.2f}" if lower else "немає") + f"\n🟢 Макс: " + (f"${upper:,.2f}" if upper else "немає")
+        msg = f"📍 <b>Ваші налаштування:</b>\n\n"
+        msg += f"🔴 Мін ціль: " + (f"${lower:,.2f}" if lower else "немає") + f"\n"
+        msg += f"🟢 Макс ціль: " + (f"${upper:,.2f}" if upper else "немає") + f"\n"
+        msg += f"⚓️ Опорний курс: " + (f"${ref:,.2f}" if ref else "очікування даних")
             
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -281,9 +322,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['upper_price'] = None
         context.user_data['notified_lower'] = False
         context.user_data['notified_upper'] = False
+        # Опорну ціну скидаємо до поточного значення, щоб не спамило сповіщеннями при очищенні
+        context.user_data['reference_price'] = current_eth_price
         
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
-        await query.edit_message_text("⏹️ Усі цілі видалено. Моніторинг меж вимкнено.", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("⏹️ Статичні цілі видалено. Опорну ціну скинуто до актуальної.", reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
 
     elif query.data == "back":
@@ -297,7 +340,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
         except:
             pass
-        await query.message.reply_text("🚀 <b>ETH Price Monitor</b>", reply_markup=get_menu_keyboard(), parse_mode="HTML")
+        await update.effective_message.reply_text("🚀 <b>ETH Price Monitor</b>", reply_markup=get_menu_keyboard(), parse_mode="HTML")
         return ConversationHandler.END
 
 async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -394,11 +437,9 @@ def main():
             SET_UPPER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_upper_price)],
         },
         fallbacks=[
-            # Якщо користувач кинув розмову на півдорозі й натиснув іншу кнопку,
-            # розмова закриється самостійно, а кнопка обробиться як треба
             CallbackQueryHandler(button_handler)
         ],
-        allow_reentry=True  # Дозволяє повторно увійти в "Встановити цілі", скидаючи старий стан
+        allow_reentry=True
     )
     
     application.add_handler(CommandHandler("start", start))
