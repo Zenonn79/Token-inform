@@ -378,29 +378,19 @@ async def show_chart(query, context):
                 keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
+                # Видаляємо старе меню
                 try:
-                    await context.bot.edit_message_media(
-                        chat_id=query.message.chat_id,
-                        message_id=query.message.message_id,
-                        media=InputMediaPhoto(
-                            media=chart_buffer,
-                            caption=message_text,
-                            parse_mode="HTML"
-                        ),
-                        reply_markup=reply_markup
-                    )
+                    await query.message.delete()
                 except:
-                    try:
-                        await query.message.delete()
-                    except:
-                        pass
-                    
-                    await query.message.reply_photo(
-                        photo=chart_buffer,
-                        caption=message_text,
-                        parse_mode="HTML",
-                        reply_markup=reply_markup
-                    )
+                    pass
+                
+                # Відправляємо графік як нове повідомлення
+                await query.message.reply_photo(
+                    photo=chart_buffer,
+                    caption=message_text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
             else:
                 keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -412,10 +402,16 @@ async def show_chart(query, context):
             logger.error(f"Помилка при показі графіка: {e}")
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "❌ Помилка при показі графіка.",
-                reply_markup=reply_markup
-            )
+            try:
+                await query.edit_message_text(
+                    "❌ Помилка при показі графіка.",
+                    reply_markup=reply_markup
+                )
+            except:
+                await query.message.reply_text(
+                    "❌ Помилка при показі графіка.",
+                    reply_markup=reply_markup
+                )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обробляє натискання кнопок"""
@@ -429,7 +425,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "set_target":
         context.user_data['show_price_active'] = False
         
-        await query.edit_message_text(
+        # Видаляємо старе меню
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        # Відправляємо нове повідомлення з запитом
+        await query.message.reply_text(
             "📍 <b>Встановити цільові ціни</b>\n\n"
             "Введи <b>мінімальну ціну</b> (нижня границя):",
             parse_mode="HTML"
@@ -504,7 +507,7 @@ async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lower_price = float(update.message.text)
         context.user_data['lower_price'] = lower_price
         
-        # Видаляємо старе повідомлення
+        # Видаляємо повідомлення користувача
         try:
             await update.message.delete()
         except:
@@ -533,7 +536,7 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         lower = context.user_data.get('lower_price')
         
-        # Видаляємо старе повідомлення
+        # Видаляємо повідомлення користувача
         try:
             await update.message.delete()
         except:
