@@ -12,11 +12,12 @@ from telegram.ext import (
 )
 import aiohttp
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import matplotlib.pyplot as plt
 from io import BytesIO
 from collections import deque
 import json
+import pytz
 
 # Налаштування логування
 logging.basicConfig(
@@ -31,6 +32,9 @@ SET_LOWER, SET_UPPER, MONITORING = range(3)
 # Отримуємо токен з Environment Variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Часовий пояс (змініть на ваш)
+TZ = pytz.timezone('Europe/Kyiv')  # Київ (можна змінити)
+
 # Перевіряємо, чи токен встановлено
 if not TELEGRAM_TOKEN:
     logger.error("❌ ПОМИЛКА: Не встановлено TELEGRAM_BOT_TOKEN в Environment Variables!")
@@ -40,6 +44,7 @@ if not TELEGRAM_TOKEN:
 monitoring_task = None
 last_notified_lower = {}
 last_notified_upper = {}
+global_price_history = {}  # Глобальна історія цін для всіх користувачів
 
 async def get_eth_price():
     """Отримує поточний курс ETH у USD"""
@@ -54,19 +59,31 @@ async def get_eth_price():
         logger.error(f"Помилка при отриманні курсу: {e}")
     return None
 
+def get_current_time():
+    """Отримує поточний час у встановленому часовому поясі"""
+    return datetime.now(TZ)
+
 def init_user_data(context: ContextTypes.DEFAULT_TYPE):
     """Ініціалізує дані користувача"""
     if 'price_history' not in context.user_data:
         context.user_data['price_history'] = {}  # {date_str: [(time, price), ...]}
     if 'show_price_active' not in context.user_data:
         context.user_data['show_price_active'] = False
-    if 'last_menu_message_id' not in context.user_data:
-        context.user_data['last_menu_message_id'] = None
 
-def add_price_to_history(context: ContextTypes.DEFAULT_TYPE, price: float):
-    """Додає ціну до історії з датою як ключ"""
-    today = datetime.now().strftime('%Y-%m-%d')
-    time_str = datetime.now().strftime('%H:%M')
+def add_price_to_global_history(price: float):
+    """Додає ціну до глобальної історії"""
+    today = get_current_time().strftime('%Y-%m-%d')
+    time_str = get_current_time().strftime('%H:%M')
+    
+    if today not in global_price_history:
+        global_price_history[today] = []
+    
+    global_price_history[today].append((time_str, price))
+
+def add_price_to_user_history(context: ContextTypes.DEFAULT_TYPE, price: float):
+    """Додає ціну до історії користувача"""
+    today = get_current_time().strftime('%Y-%m-%d')
+    time_str = get_current_time().strftime('%H:%M')
     
     if today not in context.user_data['price_history']:
         context.user_data['price_history'][today] = []
@@ -75,12 +92,17 @@ def add_price_to_history(context: ContextTypes.DEFAULT_TYPE, price: float):
 
 def get_today_prices(context: ContextTypes.DEFAULT_TYPE) -> list:
     """Отримує ціни за сьогодні"""
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = get_current_time().strftime('%Y-%m-%d')
     return context.user_data['price_history'].get(today, [])
+
+def get_global_today_prices() -> list:
+    """Отримує глобальні ціни за сьогодні"""
+    today = get_current_time().strftime('%Y-%m-%d')
+    return global_price_history.get(today, [])
 
 def cleanup_old_dates(context: ContextTypes.DEFAULT_TYPE):
     """Видаляє дані старші за сьогодні"""
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = get_current_time().strftime('%Y-%m-%d')
     dates_to_delete = []
     
     for date_key in context.user_data['price_history'].keys():
@@ -89,7 +111,20 @@ def cleanup_old_dates(context: ContextTypes.DEFAULT_TYPE):
     
     for date_key in dates_to_delete:
         del context.user_data['price_history'][date_key]
-        logger.info(f"Видалено дані за {date_key}")
+        logger.info(f"Видалено дані користувача за {date_key}")
+
+def cleanup_global_old_dates():
+    """Видаляє старі дати з глобальної історії"""
+    today = get_current_time().strftime('%Y-%m-%d')
+    dates_to_delete = []
+    
+    for date_key in global_price_history.keys():
+        if date_key != today:
+            dates_to_delete.append(date_key)
+    
+    for date_key in dates_to_delete:
+        del global_price_history[date_key]
+        logger.info(f"Видалено глобальні дані за {date_key}")
 
 def create_price_chart(prices_data):
     """Створює графік цін"""
@@ -149,7 +184,7 @@ def create_price_chart(prices_data):
 async def global_price_monitor(application: Application):
     """
     Глобальний моніторинг ціни кожні 5 хвилин.
-    Перевіряє ціну та сигналізує ВСЕ користувачам що мають встановлені цілі.
+    Записує дані й сигналізує користувачам.
     """
     global monitoring_task
     
@@ -160,7 +195,13 @@ async def global_price_monitor(application: Application):
             price = await get_eth_price()
             
             if price:
+                # ЗАПИСУЄМО ЦІНУ В ГЛОБАЛЬНУ ІСТОРІЮ
+                add_price_to_global_history(price)
+                
                 logger.info(f"Поточна ціна ETH: ${price:,.2f}")
+                
+                # Очищуємо старі дати
+                cleanup_global_old_dates()
                 
                 # Проходимо по всім активним користувачам
                 for user_id in list(last_notified_lower.keys()) + list(last_notified_upper.keys()):
@@ -176,6 +217,12 @@ async def global_price_monitor(application: Application):
                         if not lower and not upper:
                             continue
                         
+                        # ЗАПИСУЄМО ЦІНУ І ДЛЯ КОРИСТУВАЧА
+                        add_price_to_user_history(user_context, price)
+                        
+                        # Очищуємо старі дати користувача
+                        cleanup_old_dates(user_context)
+                        
                         # Перевіряємо нижню границю
                         if lower and price <= lower and not last_notified_lower.get(user_id, False):
                             await application.bot.send_message(
@@ -183,7 +230,7 @@ async def global_price_monitor(application: Application):
                                 f"🔴 <b>СИГНАЛ!</b> 🔴\n\n"
                                 f"<b>Ціна Ефіра досягла нижнього показника!</b>\n"
                                 f"💰 ${price:,.2f} ≤ ${lower:,.2f}\n"
-                                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                f"⏰ {get_current_time().strftime('%Y-%m-%d %H:%M:%S %Z')}",
                                 parse_mode="HTML"
                             )
                             last_notified_lower[user_id] = True
@@ -197,7 +244,7 @@ async def global_price_monitor(application: Application):
                                 f"🟢 <b>СИГНАЛ!</b> 🟢\n\n"
                                 f"<b>Ціна Ефіра досягла верхнього показника!</b>\n"
                                 f"💰 ${price:,.2f} ≥ ${upper:,.2f}\n"
-                                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                f"⏰ {get_current_time().strftime('%Y-%m-%d %H:%M:%S %Z')}",
                                 parse_mode="HTML"
                             )
                             last_notified_upper[user_id] = True
@@ -206,12 +253,6 @@ async def global_price_monitor(application: Application):
                     
                     except Exception as e:
                         logger.error(f"Помилка при обробці користувача {user_id}: {e}")
-            
-            # Очищуємо старі дані за попередні дні
-            for user_id in last_notified_lower.keys():
-                user_context = application.user_data.get(user_id)
-                if user_context:
-                    cleanup_old_dates(user_context)
                     
         except asyncio.CancelledError:
             logger.info("Глобальний моніторинг зупинений")
@@ -276,13 +317,13 @@ async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
                     lower = context.user_data.get('lower_price')
                     upper = context.user_data.get('upper_price')
                     
-                    # Додаємо ціну до історії
-                    add_price_to_history(context, price)
+                    # ЗАПИСУЄМО ЦІНУ
+                    add_price_to_user_history(context, price)
                     
                     if last_price is None or abs(price - last_price) >= 0.01:
                         message = f"💰 <b>Поточний курс Ефіра</b>\n"
                         message += f"<code>${price:,.2f}</code>\n"
-                        message += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+                        message += f"⏰ {get_current_time().strftime('%H:%M:%S')}\n"
                         message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
                         
                         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
@@ -322,12 +363,12 @@ async def show_current_price(query, context):
         lower = context.user_data.get('lower_price')
         upper = context.user_data.get('upper_price')
         
-        # Додаємо ціну до історії
-        add_price_to_history(context, price)
+        # ЗАПИСУЄМО ЦІНУ
+        add_price_to_user_history(context, price)
         
         message = f"💰 <b>Поточний курс Ефіра</b>\n"
         message += f"<code>${price:,.2f}</code>\n"
-        message += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+        message += f"⏰ {get_current_time().strftime('%H:%M:%S')}\n"
         message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
     else:
         message = "❌ Не вдалося отримати курс. Спробуй пізніше."
@@ -368,7 +409,7 @@ async def show_chart(query, context):
                 
                 message_text = (
                     "📈 <b>Графік цін Ефіра (сьогодні)</b>\n\n"
-                    f"📊 Дата: {datetime.now().strftime('%Y-%m-%d')}\n"
+                    f"📊 Дата: {get_current_time().strftime('%Y-%m-%d')}\n"
                     f"🔢 Дані: {len(prices_data)} точок\n"
                     f"💰 Мінімум: ${min(p[1] for p in prices_data):,.2f}\n"
                     f"💰 Максимум: ${max(p[1] for p in prices_data):,.2f}\n"
@@ -444,7 +485,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "stop_monitoring":
         context.user_data['show_price_active'] = False
         
-        # Видаляємо користувача з моніторингу
         user_id = update.effective_user.id
         if user_id in last_notified_lower:
             del last_notified_lower[user_id]
@@ -550,7 +590,6 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "📤 Ти отримаєш сигнали при досягненні цілей."
         )
         
-        # Додаємо користувача до глобального моніторингу
         user_id = update.effective_user.id
         last_notified_lower[user_id] = False
         last_notified_upper[user_id] = False
@@ -595,7 +634,6 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     
-    # Обробники
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(button_handler))
