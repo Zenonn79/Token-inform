@@ -1,6 +1,6 @@
 import logging
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,42 +12,30 @@ from telegram.ext import (
 )
 import aiohttp
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 import matplotlib.pyplot as plt
 from io import BytesIO
-from collections import deque
-import json
 import pytz
 
-# Налаштування логування
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Стани для ConversationHandler
-SET_LOWER, SET_UPPER, MONITORING = range(3)
-
-# Отримуємо токен з Environment Variables
+SET_LOWER, SET_UPPER = range(2)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TZ = pytz.timezone('Europe/Kyiv')
 
-# Часовий пояс (змініть на ваш)
-TZ = pytz.timezone('Europe/Kyiv')  # Київ (можна змінити)
-
-# Перевіряємо, чи токен встановлено
 if not TELEGRAM_TOKEN:
-    logger.error("❌ ПОМИЛКА: Не встановлено TELEGRAM_BOT_TOKEN в Environment Variables!")
-    raise ValueError("TELEGRAM_BOT_TOKEN не знайдено в змінних оточення")
+    raise ValueError("TELEGRAM_BOT_TOKEN не знайдено!")
 
-# Глобальний моніторинг (єдиний для всіх користувачів)
-monitoring_task = None
 last_notified_lower = {}
 last_notified_upper = {}
-global_price_history = {}  # Глобальна історія цін для всіх користувачів
+global_price_history = {}
 
 async def get_eth_price():
-    """Отримує поточний курс ETH у USD"""
+    """Отримує ціну ETH"""
     try:
         async with aiohttp.ClientSession() as session:
             url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
@@ -60,71 +48,29 @@ async def get_eth_price():
     return None
 
 def get_current_time():
-    """Отримує поточний час у встановленому часовому поясі"""
+    """Отримує поточний час"""
     return datetime.now(TZ)
 
-def init_user_data(context: ContextTypes.DEFAULT_TYPE):
-    """Ініціалізує дані користувача"""
+def add_price_to_history(context, price):
+    """Додає ціну до історії"""
+    today = get_current_time().strftime('%Y-%m-%d')
+    time_str = get_current_time().strftime('%H:%M')
+    
     if 'price_history' not in context.user_data:
-        context.user_data['price_history'] = {}  # {date_str: [(time, price), ...]}
-    if 'show_price_active' not in context.user_data:
-        context.user_data['show_price_active'] = False
-
-def add_price_to_global_history(price: float):
-    """Додає ціну до глобальної історії"""
-    today = get_current_time().strftime('%Y-%m-%d')
-    time_str = get_current_time().strftime('%H:%M')
-    
-    if today not in global_price_history:
-        global_price_history[today] = []
-    
-    global_price_history[today].append((time_str, price))
-
-def add_price_to_user_history(context: ContextTypes.DEFAULT_TYPE, price: float):
-    """Додає ціну до історії користувача"""
-    today = get_current_time().strftime('%Y-%m-%d')
-    time_str = get_current_time().strftime('%H:%M')
+        context.user_data['price_history'] = {}
     
     if today not in context.user_data['price_history']:
         context.user_data['price_history'][today] = []
     
     context.user_data['price_history'][today].append((time_str, price))
 
-def get_today_prices(context: ContextTypes.DEFAULT_TYPE) -> list:
+def get_today_prices(context):
     """Отримує ціни за сьогодні"""
+    if 'price_history' not in context.user_data:
+        return []
+    
     today = get_current_time().strftime('%Y-%m-%d')
     return context.user_data['price_history'].get(today, [])
-
-def get_global_today_prices() -> list:
-    """Отримує глобальні ціни за сьогодні"""
-    today = get_current_time().strftime('%Y-%m-%d')
-    return global_price_history.get(today, [])
-
-def cleanup_old_dates(context: ContextTypes.DEFAULT_TYPE):
-    """Видаляє дані старші за сьогодні"""
-    today = get_current_time().strftime('%Y-%m-%d')
-    dates_to_delete = []
-    
-    for date_key in context.user_data['price_history'].keys():
-        if date_key != today:
-            dates_to_delete.append(date_key)
-    
-    for date_key in dates_to_delete:
-        del context.user_data['price_history'][date_key]
-        logger.info(f"Видалено дані користувача за {date_key}")
-
-def cleanup_global_old_dates():
-    """Видаляє старі дати з глобальної історії"""
-    today = get_current_time().strftime('%Y-%m-%d')
-    dates_to_delete = []
-    
-    for date_key in global_price_history.keys():
-        if date_key != today:
-            dates_to_delete.append(date_key)
-    
-    for date_key in dates_to_delete:
-        del global_price_history[date_key]
-        logger.info(f"Видалено глобальні дані за {date_key}")
 
 def create_price_chart(prices_data):
     """Створює графік цін"""
@@ -132,45 +78,33 @@ def create_price_chart(prices_data):
         if not prices_data:
             return None
         
-        # Дані для графіка
         times = [item[0] for item in prices_data]
         prices = [item[1] for item in prices_data]
         
-        # Створюємо графік
         fig, ax = plt.subplots(figsize=(10, 5), facecolor='#2b2d31')
         ax.set_facecolor('#1e1f22')
         
-        # Малюємо лінію
-        ax.plot(times, prices, color='#5865f2', linewidth=2.5, marker='o', markersize=4)
-        
-        # Заповнюємо область під лінією
+        ax.plot(times, prices, color='#5865f2', linewidth=2.5, marker='o', markersize=6)
         ax.fill_between(range(len(prices)), prices, alpha=0.2, color='#5865f2')
         
-        # Встановлюємо межі осі Y з +/- 100
         min_price = min(prices)
         max_price = max(prices)
         y_min = max(0, min_price - 100)
         y_max = max_price + 100
         ax.set_ylim(y_min, y_max)
         
-        # Форматування осей
         ax.set_xlabel('Час', color='#b5bac1', fontsize=10)
         ax.set_ylabel('Ціна (USD)', color='#b5bac1', fontsize=10)
         ax.set_title('📈 Історія цін Ефіра (сьогодні)', color='#ffffff', fontsize=12, fontweight='bold')
         
-        # Сітка
         ax.grid(True, alpha=0.2, color='#4f545c')
-        
-        # Колір текста
         ax.tick_params(colors='#b5bac1')
         
-        # Форматування x-осі
-        ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+        ax.xaxis.set_major_locator(plt.MaxNLocator(8))
         plt.xticks(rotation=45, ha='right')
         
         plt.tight_layout()
         
-        # Зберігаємо в буфер
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight', facecolor='#2b2d31')
         buffer.seek(0)
@@ -181,35 +115,26 @@ def create_price_chart(prices_data):
         logger.error(f"Помилка при створенні графіка: {e}")
         return None
 
-async def global_price_monitor(application: Application):
-    """
-    Глобальний моніторинг ціни кожні 5 хвилин.
-    Записує дані й сигналізує користувачам.
-    """
-    global monitoring_task
-    
+async def global_price_monitor(application):
+    """Глобальний моніторинг кожні 60 сек"""
     while True:
         try:
-            await asyncio.sleep(300)  # 5 хвилин
+            await asyncio.sleep(60)
             
             price = await get_eth_price()
             
             if price:
-                # ЗАПИСУЄМО ЦІНУ В ГЛОБАЛЬНУ ІСТОРІЮ
-                add_price_to_global_history(price)
-                
-                logger.info(f"Поточна ціна ETH: ${price:,.2f}")
-                
-                # Очищуємо старі дати
-                cleanup_global_old_dates()
+                logger.info(f"ETH: ${price:,.2f}")
                 
                 # Проходимо по всім активним користувачам
                 for user_id in list(last_notified_lower.keys()) + list(last_notified_upper.keys()):
                     try:
-                        # Отримуємо контекст користувача
                         user_context = application.user_data.get(user_id)
                         if not user_context:
                             continue
+                        
+                        # ЗАПИСУЄМО ЦІНУ
+                        add_price_to_history(user_context, price)
                         
                         lower = user_context.get('lower_price')
                         upper = user_context.get('upper_price')
@@ -217,34 +142,28 @@ async def global_price_monitor(application: Application):
                         if not lower and not upper:
                             continue
                         
-                        # ЗАПИСУЄМО ЦІНУ І ДЛЯ КОРИСТУВАЧА
-                        add_price_to_user_history(user_context, price)
-                        
-                        # Очищуємо старі дати користувача
-                        cleanup_old_dates(user_context)
-                        
-                        # Перевіряємо нижню границю
+                        # СИГНАЛ НА НИЖНЮ ГРАНИЦЮ
                         if lower and price <= lower and not last_notified_lower.get(user_id, False):
                             await application.bot.send_message(
                                 user_id,
-                                f"🔴 <b>СИГНАЛ!</b> 🔴\n\n"
-                                f"<b>Ціна Ефіра досягла нижнього показника!</b>\n"
-                                f"💰 ${price:,.2f} ≤ ${lower:,.2f}\n"
-                                f"⏰ {get_current_time().strftime('%Y-%m-%d %H:%M:%S %Z')}",
+                                f"🔴 <b>СИГНАЛ!</b>\n\n"
+                                f"Ціна досягла {lower}!\n"
+                                f"Поточна: ${price:,.2f}\n"
+                                f"⏰ {get_current_time().strftime('%H:%M:%S')}",
                                 parse_mode="HTML"
                             )
                             last_notified_lower[user_id] = True
                         elif price > lower * 1.05:
                             last_notified_lower[user_id] = False
                         
-                        # Перевіряємо верхню границю
+                        # СИГНАЛ НА ВЕРХНЮ ГРАНИЦЮ
                         if upper and price >= upper and not last_notified_upper.get(user_id, False):
                             await application.bot.send_message(
                                 user_id,
-                                f"🟢 <b>СИГНАЛ!</b> 🟢\n\n"
-                                f"<b>Ціна Ефіра досягла верхнього показника!</b>\n"
-                                f"💰 ${price:,.2f} ≥ ${upper:,.2f}\n"
-                                f"⏰ {get_current_time().strftime('%Y-%m-%d %H:%M:%S %Z')}",
+                                f"🟢 <b>СИГНАЛ!</b>\n\n"
+                                f"Ціна досягла {upper}!\n"
+                                f"Поточна: ${price:,.2f}\n"
+                                f"⏰ {get_current_time().strftime('%H:%M:%S')}",
                                 parse_mode="HTML"
                             )
                             last_notified_upper[user_id] = True
@@ -252,210 +171,110 @@ async def global_price_monitor(application: Application):
                             last_notified_upper[user_id] = False
                     
                     except Exception as e:
-                        logger.error(f"Помилка при обробці користувача {user_id}: {e}")
+                        logger.error(f"Помилка користувача {user_id}: {e}")
                     
-        except asyncio.CancelledError:
-            logger.info("Глобальний моніторинг зупинений")
-            break
         except Exception as e:
-            logger.error(f"Помилка в глобальному моніторингу: {e}")
+            logger.error(f"Помилка в моніторингу: {e}")
+
+async def show_menu(message):
+    """Відправляє меню"""
+    keyboard = [
+        [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
+        [InlineKeyboardButton("📍 Встановити ціль", callback_data="set_target")],
+        [InlineKeyboardButton("📈 Графік цін", callback_data="show_chart")],
+        [InlineKeyboardButton("⚙️ Мої цілі", callback_data="show_targets")],
+        [InlineKeyboardButton("🛑 Зупинити", callback_data="stop")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        "🚀 <b>ETH Price Monitor</b>\n\n"
+        "Слідкування за курсом Ефіра",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start та автоматичний старт при першому повідомленні"""
-    # Видаляємо користувацьке повідомлення
+    """Старт"""
     try:
         await update.message.delete()
     except:
         pass
     
-    # Ініціалізуємо дані
-    init_user_data(context)
-    
-    keyboard = [
-        [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
-        [InlineKeyboardButton("📍 Встановити ціль", callback_data="set_target")],
-        [InlineKeyboardButton("📈 Історія цін", callback_data="show_chart")],
-        [InlineKeyboardButton("⚙️ Мої цілі", callback_data="show_targets")],
-        [InlineKeyboardButton("🛑 Зупинити моніторинг", callback_data="stop_monitoring")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message_text = (
-        "🚀 <b>ETH Price Monitor</b>\n\n"
-        "Слідкування за курсом Ефіра в реальному часі\n\n"
-        "✨ <b>Доступні функції:</b>\n"
-        "📊 Показати поточний курс\n"
-        "📍 Встановити цільові ціни\n"
-        "📈 Переглянути графік цін\n"
-        "⚙️ Дивитися свої цілі\n\n"
-        "<i>Бот автоматично сигналізує при досягненні цілей 🔔</i>"
-    )
-    
-    await update.message.reply_text(
-        message_text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
-
-async def auto_update_price(query, context: ContextTypes.DEFAULT_TYPE):
-    """Оновлює ціну коли користувач дивиться курс"""
-    try:
-        message_id = query.message.message_id
-        chat_id = query.message.chat_id
-        last_price = None
-        
-        while context.user_data.get('show_price_active', False):
-            await asyncio.sleep(10)
-            
-            if not context.user_data.get('show_price_active'):
-                break
-            
-            try:
-                price = await get_eth_price()
-                
-                if price:
-                    lower = context.user_data.get('lower_price')
-                    upper = context.user_data.get('upper_price')
-                    
-                    # ЗАПИСУЄМО ЦІНУ
-                    add_price_to_user_history(context, price)
-                    
-                    if last_price is None or abs(price - last_price) >= 0.01:
-                        message = f"💰 <b>Поточний курс Ефіра</b>\n"
-                        message += f"<code>${price:,.2f}</code>\n"
-                        message += f"⏰ {get_current_time().strftime('%H:%M:%S')}\n"
-                        message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
-                        
-                        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-                        reply_markup = InlineKeyboardMarkup(keyboard)
-                        
-                        try:
-                            await context.bot.edit_message_text(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                text=message,
-                                reply_markup=reply_markup,
-                                parse_mode="HTML"
-                            )
-                            last_price = price
-                        except Exception as e:
-                            if "not modified" not in str(e).lower():
-                                logger.error(f"Помилка при оновленні: {e}")
-                                break
-                                
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Помилка в циклі: {e}")
-                break
-                
-    except Exception as e:
-        logger.error(f"Помилка в auto_update_price: {e}")
+    await show_menu(update.message)
 
 async def show_current_price(query, context):
-    """Показує поточний курс ETH з автооновленням"""
-    init_user_data(context)
-    context.user_data['show_price_active'] = True
+    """Показує поточний курс"""
+    if 'price_history' not in context.user_data:
+        context.user_data['price_history'] = {}
     
+    context.user_data['show_price_active'] = True
     price = await get_eth_price()
     
     if price:
-        lower = context.user_data.get('lower_price')
-        upper = context.user_data.get('upper_price')
-        
-        # ЗАПИСУЄМО ЦІНУ
-        add_price_to_user_history(context, price)
-        
-        message = f"💰 <b>Поточний курс Ефіра</b>\n"
-        message += f"<code>${price:,.2f}</code>\n"
-        message += f"⏰ {get_current_time().strftime('%H:%M:%S')}\n"
-        message += "🔄 <i>(оновлюється кожні 10 сек)</i>"
+        add_price_to_history(context, price)
+        message = f"💰 <b>Поточний курс</b>\n\n<code>${price:,.2f}</code>\n\n⏰ {get_current_time().strftime('%H:%M:%S')}"
     else:
-        message = "❌ Не вдалося отримати курс. Спробуй пізніше."
+        message = "❌ Помилка при отриманні ціни"
     
-    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Помилка: {e}")
-    
-    context.application.create_task(auto_update_price(query, context))
+    except:
+        pass
 
 async def show_chart(query, context):
-    """Показує графік історії цін за сьогодні"""
-    context.user_data['show_price_active'] = False
+    """Показує графік"""
+    if 'price_history' not in context.user_data:
+        context.user_data['price_history'] = {}
     
+    context.user_data['show_price_active'] = False
     prices_data = get_today_prices(context)
     
+    # Видаляємо старе меню
+    try:
+        await query.message.delete()
+    except:
+        pass
+    
     if len(prices_data) < 2:
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            "📈 <b>Історія цін</b>\n\n"
-            "⚠️ Недостатньо даних для графіка.\n"
-            "Дивись на курс хоча б 2 рази (20 сек) для накопичення даних.",
+        await query.message.reply_text(
+            "📈 <b>Недостатньо даних</b>\n\n"
+            "Потрібно мінімум 2 точки. Дивись курс кілька разів.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
     else:
-        try:
-            chart_buffer = create_price_chart(prices_data)
+        chart_buffer = create_price_chart(prices_data)
+        
+        if chart_buffer:
+            message_text = (
+                f"📈 <b>Графік (сьогодні)</b>\n\n"
+                f"Дата: {get_current_time().strftime('%Y-%m-%d')}\n"
+                f"Точок: {len(prices_data)}\n"
+                f"Мін: ${min(p[1] for p in prices_data):,.2f}\n"
+                f"Макс: ${max(p[1] for p in prices_data):,.2f}\n"
+                f"Остання: ${prices_data[-1][1]:,.2f}"
+            )
             
-            if chart_buffer:
-                chart_buffer.seek(0)
-                
-                message_text = (
-                    "📈 <b>Графік цін Ефіра (сьогодні)</b>\n\n"
-                    f"📊 Дата: {get_current_time().strftime('%Y-%m-%d')}\n"
-                    f"🔢 Дані: {len(prices_data)} точок\n"
-                    f"💰 Мінімум: ${min(p[1] for p in prices_data):,.2f}\n"
-                    f"💰 Максимум: ${max(p[1] for p in prices_data):,.2f}\n"
-                    f"📍 Остання: ${prices_data[-1][1]:,.2f}"
-                )
-                
-                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                # Видаляємо старе меню
-                try:
-                    await query.message.delete()
-                except:
-                    pass
-                
-                # Відправляємо графік як нове повідомлення
-                await query.message.reply_photo(
-                    photo=chart_buffer,
-                    caption=message_text,
-                    parse_mode="HTML",
-                    reply_markup=reply_markup
-                )
-            else:
-                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "❌ Помилка при створенні графіка.",
-                    reply_markup=reply_markup
-                )
-        except Exception as e:
-            logger.error(f"Помилка при показі графіка: {e}")
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            try:
-                await query.edit_message_text(
-                    "❌ Помилка при показі графіка.",
-                    reply_markup=reply_markup
-                )
-            except:
-                await query.message.reply_text(
-                    "❌ Помилка при показі графіка.",
-                    reply_markup=reply_markup
-                )
+            
+            chart_buffer.seek(0)
+            await query.message.reply_photo(
+                photo=chart_buffer,
+                caption=message_text,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє натискання кнопок"""
+    """Обробка кнопок"""
     query = update.callback_query
     await query.answer()
     
@@ -464,85 +283,71 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "show_chart":
         await show_chart(query, context)
     elif query.data == "set_target":
-        context.user_data['show_price_active'] = False
-        
-        # Видаляємо старе меню
+        # Видаляємо меню
         try:
             await query.message.delete()
         except:
             pass
         
-        # Відправляємо нове повідомлення з запитом
         await query.message.reply_text(
-            "📍 <b>Встановити цільові ціни</b>\n\n"
-            "Введи <b>мінімальну ціну</b> (нижня границя):",
+            "📍 <b>Встановити ціль</b>\n\n"
+            "Введи <b>мінімальну ціну</b>:",
             parse_mode="HTML"
         )
         return SET_LOWER
     elif query.data == "show_targets":
         context.user_data['show_price_active'] = False
-        await show_targets(query, context)
-    elif query.data == "stop_monitoring":
-        context.user_data['show_price_active'] = False
         
+        lower = context.user_data.get('lower_price')
+        upper = context.user_data.get('upper_price')
+        
+        if not lower and not upper:
+            msg = "❌ Цілі не встановлені"
+        else:
+            msg = f"📍 <b>Мої цілі</b>\n\n"
+            if lower:
+                msg += f"🔴 Мін: ${lower:,.2f}\n"
+            if upper:
+                msg += f"🟢 Макс: ${upper:,.2f}"
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+        except:
+            pass
+    elif query.data == "stop":
         user_id = update.effective_user.id
         if user_id in last_notified_lower:
             del last_notified_lower[user_id]
         if user_id in last_notified_upper:
             del last_notified_upper[user_id]
         
-        await query.edit_message_text(
-            "⏹️ <b>Моніторинг зупинено.</b>",
-            parse_mode="HTML"
-        )
-        await send_main_menu(query, context)
-    elif query.data == "back_menu":
+        # Видаляємо меню
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        await query.message.reply_text("⏹️ Моніторинг зупинено")
+        
+        # Показуємо нове меню
+        await show_menu(query.message)
+    elif query.data == "back":
         context.user_data['show_price_active'] = False
-        await send_main_menu(query, context)
-
-async def show_targets(query, context):
-    """Показує встановлені цільові ціни"""
-    lower = context.user_data.get('lower_price')
-    upper = context.user_data.get('upper_price')
-    
-    if not lower and not upper:
-        message = "⚙️ <b>Мої цільові ціни</b>\n\n"
-        message += "❌ Ти ще не встановив цільові ціни.\n\n"
-        message += "📍 Натисни '<b>Встановити ціль</b>' для додавання."
-    else:
-        message = "⚙️ <b>Мої цільові ціни</b>\n\n"
-        if lower:
-            message += f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
-        if upper:
-            message += f"📍 <b>Верхня границя:</b> <code>${upper:,.2f}</code>\n"
-        message += f"\n💡 Бот подасть сигнал при досягненні цілей!"
-    
-    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
-
-async def send_main_menu(query, context):
-    """Відправляє головне меню"""
-    keyboard = [
-        [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
-        [InlineKeyboardButton("📍 Встановити ціль", callback_data="set_target")],
-        [InlineKeyboardButton("📈 Історія цін", callback_data="show_chart")],
-        [InlineKeyboardButton("⚙️ Мої цілі", callback_data="show_targets")],
-        [InlineKeyboardButton("🛑 Зупинити моніторинг", callback_data="stop_monitoring")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message_text = "🏠 <b>Головне меню</b>"
-    
-    await query.edit_message_text(
-        message_text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
+        
+        # Видаляємо старе повідомлення
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        # Показуємо нове меню
+        await show_menu(query.message)
 
 async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє введення мінімальної ціни"""
+    """Обробка нижної ціни"""
     try:
         lower_price = float(update.message.text)
         context.user_data['lower_price'] = lower_price
@@ -554,22 +359,17 @@ async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
             pass
         
         await update.message.reply_text(
-            f"✅ <b>Нижня границя встановлена:</b> <code>${lower_price:,.2f}</code>\n\n"
-            "➡️ Тепер введи <b>ВЕРХНЮ ціну</b>:",
+            f"✅ Мін встановлена: ${lower_price:,.2f}\n\n"
+            "Введи <b>максимальну ціну</b>:",
             parse_mode="HTML"
         )
         return SET_UPPER
     except ValueError:
-        await update.message.reply_text(
-            "❌ <b>Помилка!</b>\n\n"
-            "Введи коректне число\n"
-            "<i>Приклад: 2500 або 2500.50</i>",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text("❌ Введи число! Приклад: 2500")
         return SET_LOWER
 
 async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє введення максимальної ціни"""
+    """Обробка верхної ціни"""
     try:
         upper_price = float(update.message.text)
         context.user_data['upper_price'] = upper_price
@@ -582,47 +382,33 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except:
             pass
         
-        message = (
-            "✅ <b>Цільові ціни встановлені!</b>\n\n"
-            f"📍 <b>Нижня границя:</b> <code>${lower:,.2f}</code>\n"
-            f"📍 <b>Верхня границя:</b> <code>${upper_price:,.2f}</code>\n\n"
-            "🔔 <b>Моніторинг активний!</b>\n"
-            "📤 Ти отримаєш сигнали при досягненні цілей."
-        )
-        
         user_id = update.effective_user.id
         last_notified_lower[user_id] = False
         last_notified_upper[user_id] = False
         
-        keyboard = [
-            [InlineKeyboardButton("📊 Показати курс", callback_data="show_price")],
-            [InlineKeyboardButton("⚙️ Мої цілі", callback_data="show_targets")],
-            [InlineKeyboardButton("🏠 Меню", callback_data="back_menu")]
-        ]
+        await update.message.reply_text(
+            f"✅ <b>Цілі встановлені!</b>\n\n"
+            f"🔴 Мін: ${lower:,.2f}\n"
+            f"🟢 Макс: ${upper_price:,.2f}\n\n"
+            f"🔔 Моніторинг активний!"
+        )
+        
+        keyboard = [[InlineKeyboardButton("🏠 Меню", callback_data="back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
+        await update.message.reply_text("Повертайся в меню", reply_markup=reply_markup)
+        
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text(
-            "❌ <b>Помилка!</b>\n\n"
-            "Введи коректне число\n"
-            "<i>Приклад: 3000 або 3000.50</i>",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text("❌ Введи число! Приклад: 3000")
         return SET_UPPER
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Скасовує операцію"""
-    await update.message.reply_text("❌ Скасовано.")
-    return ConversationHandler.END
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє будь-яке повідомлення - автоматично стартує бот"""
+    """Автоматичний старт"""
     await start(update, context)
 
 def main():
-    """Запускає бот"""
+    """Запуск"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -631,7 +417,7 @@ def main():
             SET_LOWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_lower_price)],
             SET_UPPER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_upper_price)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[],
     )
     
     application.add_handler(CommandHandler("start", start))
@@ -639,7 +425,6 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Запускаємо глобальний моніторинг
     async def startup(application):
         asyncio.create_task(global_price_monitor(application))
     
