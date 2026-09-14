@@ -36,6 +36,25 @@ current_eth_price = None
 global_price_history = []  # Список кортежів: (datetime_obj, price)
 active_users = set()       # Користувачі, які взаємодіяли з ботом
 
+
+def format_price(price):
+    """
+    Форматує ціну з достатньою кількістю знаків після коми.
+    Для дешевих токенів (як CAP, $0.05871) 2 знаки після коми
+    округлюють все до нуля/копійок — тому кількість знаків
+    підбирається залежно від величини ціни.
+    """
+    if price is None:
+        return "н/д"
+    price = float(price)
+    if price >= 1:
+        return f"${price:,.2f}"
+    elif price >= 0.01:
+        return f"${price:,.4f}"
+    else:
+        return f"${price:,.6f}"
+
+
 async def get_eth_price():
     """Отримує актуальну ціну CAP з Coingecko"""
     try:
@@ -78,16 +97,16 @@ def create_price_chart(lower_target=None, upper_target=None):
         ax.fill_between(range(len(prices)), prices, min(prices) - 10, alpha=0.15, color='#5865f2')
         
         if lower_target:
-            ax.axhline(y=lower_target, color='#ed4245', linestyle='--', linewidth=1.5, label=f'Ціль Мін: ${lower_target:,.2f}')
+            ax.axhline(y=lower_target, color='#ed4245', linestyle='--', linewidth=1.5, label=f'Ціль Мін: {format_price(lower_target)}')
         if upper_target:
-            ax.axhline(y=upper_target, color='#57f287', linestyle='--', linewidth=1.5, label=f'Ціль Макс: ${upper_target:,.2f}')
+            ax.axhline(y=upper_target, color='#57f287', linestyle='--', linewidth=1.5, label=f'Ціль Макс: {format_price(upper_target)}')
 
         ax.set_xlabel('Час', color='#b5bac1', fontsize=10)
         ax.set_ylabel('Ціна (USD)', color='#b5bac1', fontsize=10)
         
         title_text = (
             f"📈 Історія цін CAP (сьогодні)\n"
-            f"Min за день: ${min_today:,.2f}  |  Max за день: ${max_today:,.2f}"
+            f"Min за день: {format_price(min_today)}  |  Max за день: {format_price(max_today)}"
         )
         ax.set_title(title_text, color='#ffffff', fontsize=11, fontweight='bold', pad=12)
         
@@ -133,7 +152,7 @@ async def global_price_monitor(application: Application):
                     active_price_msg_id = user_data.get('active_price_msg_id')
                     if active_price_msg_id:
                         try:
-                            msg_text = f"💰 <b>Поточний курс ETH</b>\n\n<code>${price:,.2f}</code>\n\n⏰ Оновлено: {now.strftime('%H:%M:%S')}"
+                            msg_text = f"💰 <b>Поточний курс ETH</b>\n\n<code>{format_price(price)}</code>\n\n⏰ Оновлено: {now.strftime('%H:%M:%S')}"
                             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
                             
                             await application.bot.edit_message_text(
@@ -165,9 +184,9 @@ async def global_price_monitor(application: Application):
                             alert_msg = (
                                 f"{emoji}\n\n"
                                 f"Ціна CAP {trend_str} на <b>{abs(percent_change):.2f}%</b>\n"
-                                f"Попередня опорна: <code>${ref_price:,.2f}</code>\n"
-                                f"Поточна ціна: <b>${price:,.2f}</b>\n\n"
-                                f"📌 <i>Цю ціну (${price:,.2f}) зафіксовано як нову опорну точку.</i>"
+                                f"Попередня опорна: <code>{format_price(ref_price)}</code>\n"
+                                f"Поточна ціна: <b>{format_price(price)}</b>\n\n"
+                                f"📌 <i>Цю ціну ({format_price(price)}) зафіксовано як нову опорну точку.</i>"
                             )
                             
                             try:
@@ -185,7 +204,7 @@ async def global_price_monitor(application: Application):
                     if lower and price <= lower and not user_data.get('notified_lower', False):
                         await application.bot.send_message(
                             user_id,
-                            f"🔴 <b>СИГНАЛ! Ціна впала нижче межі!</b>\n\nЦільова: {lower}\nПоточна: <b>${price:,.2f}</b>",
+                            f"🔴 <b>СИГНАЛ! Ціна впала нижче межі!</b>\n\nЦільова: {format_price(lower)}\nПоточна: <b>{format_price(price)}</b>",
                             parse_mode="HTML"
                         )
                         user_data['notified_lower'] = True
@@ -195,7 +214,7 @@ async def global_price_monitor(application: Application):
                     if upper and price >= upper and not user_data.get('notified_upper', False):
                         await application.bot.send_message(
                             user_id,
-                            f"🟢 <b>СИГНАЛ! Ціна зросла вище межі!</b>\n\nЦільова: {upper}\nПоточна: <b>${price:,.2f}</b>",
+                            f"🟢 <b>СИГНАЛ! Ціна зросла вище межі!</b>\n\nЦільова: {format_price(upper)}\nПоточна: <b>{format_price(price)}</b>",
                             parse_mode="HTML"
                         )
                         user_data['notified_upper'] = True
@@ -255,7 +274,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             display_time, display_price = global_price_history[-1]
 
         if display_price:
-            msg = f"💰 <b>Поточний курс CAP</b>\n\n<code>${display_price:,.2f}</code>\n\n⏰ Оновлено: {display_time.strftime('%H:%M:%S')}"
+            msg = f"💰 <b>Поточний курс CAP</b>\n\n<code>{format_price(display_price)}</code>\n\n⏰ Оновлено: {display_time.strftime('%H:%M:%S')}"
         else:
             msg = "⏳ Зачекайте, завантажуються перші дані..."
             
@@ -284,12 +303,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             caption_text = (
                 f"📊 <b>Аналітика за сьогодні:</b>\n"
-                f"🔹 Найнижча фіксація: <code>${min_today:,.2f}</code>\n"
-                f"🔸 Найвища фіксація: <code>${max_today:,.2f}</code>\n"
-                f"📍 Поточна опорна ціна: " + (f"<code>${ref_price:,.2f}</code>" if ref_price else "не зафіксована") + "\n\n"
+                f"🔹 Найнижча фіксація: <code>{format_price(min_today)}</code>\n"
+                f"🔸 Найвища фіксація: <code>{format_price(max_today)}</code>\n"
+                f"📍 Поточна опорна ціна: " + (f"<code>{format_price(ref_price)}</code>" if ref_price else "не зафіксована") + "\n\n"
                 f"🎯 <b>Ваші цілі:</b>\n"
-                f"🔴 Нижній поріг: " + (f"<code>${lower_target:,.2f}</code>" if lower_target else "не вказано") + "\n"
-                f"🟢 Верхній поріг: " + (f"<code>${upper_target:,.2f}</code>" if upper_target else "не вказано")
+                f"🔴 Нижній поріг: " + (f"<code>{format_price(lower_target)}</code>" if lower_target else "не вказано") + "\n"
+                f"🟢 Верхній поріг: " + (f"<code>{format_price(upper_target)}</code>" if upper_target else "не вказано")
             )
             
             keyboard = [[InlineKeyboardButton("🏠 Меню", callback_data="back_from_chart")]]
@@ -308,9 +327,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref = context.user_data.get('reference_price')
         
         msg = f"📍 <b>Ваші налаштування:</b>\n\n"
-        msg += f"🔴 Мін ціль: " + (f"${lower:,.2f}" if lower else "немає") + f"\n"
-        msg += f"🟢 Макс ціль: " + (f"${upper:,.2f}" if upper else "немає") + f"\n"
-        msg += f"⚓️ Опорний курс: " + (f"${ref:,.2f}" if ref else "очікування даних")
+        msg += f"🔴 Мін ціль: " + (format_price(lower) if lower else "немає") + f"\n"
+        msg += f"🟢 Макс ціль: " + (format_price(upper) if upper else "немає") + f"\n"
+        msg += f"⚓️ Опорний курс: " + (format_price(ref) if ref else "очікування даних")
             
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -368,7 +387,7 @@ async def handle_lower_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         chat_id = update.effective_chat.id
         msg_id = context.user_data.get('conv_menu_msg_id')
         
-        lower_status = f"${val:,.2f}" if val > 0 else "Вимкнено"
+        lower_status = format_price(val) if val > 0 else "Вимкнено"
         text = f"✅ Нижня межа: {lower_status}\n\nТепер введіть <b>максимальну ціну</b> (або 0):"
         
         if msg_id:
@@ -403,8 +422,8 @@ async def handle_upper_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         text = (
             f"🎯 <b>Цілі успішно оновлені!</b>\n\n"
-            f"🔴 Мін: " + (f"${lower:,.2f}" if lower else "немає") + f"\n"
-            f"🟢 Макс: " + (f"${val:,.2f}" if val > 0 else "немає") + f"\n\n"
+            f"🔴 Мін: " + (format_price(lower) if lower else "немає") + f"\n"
+            f"🟢 Макс: " + (format_price(val) if val > 0 else "немає") + f"\n\n"
             f"Бот автоматично сповістить вас у разі пробиття меж."
         )
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="back_from_chart")]])
