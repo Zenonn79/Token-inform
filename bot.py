@@ -40,7 +40,7 @@ async def get_eth_price():
     """Отримує актуальну ціну ETH з Coingecko"""
     try:
         async with aiohttp.ClientSession() as session:
-            url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=cap-4&vs_currencies=usd"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as response:
                 if response.status == 200:
                     data = await response.json()
