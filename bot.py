@@ -44,7 +44,7 @@ async def get_eth_price():
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data['ethereum']['usd']
+                    return data['cap-4']['usd']
                 elif response.status == 429:
                     logger.warning("CoinGecko API Rate Limit hit (429).")
     except Exception as e:
@@ -74,7 +74,7 @@ def create_price_chart(lower_target=None, upper_target=None):
         fig, ax = plt.subplots(figsize=(10, 5.5), facecolor='#2b2d31')
         ax.set_facecolor('#1e1f22')
         
-        ax.plot(times, prices, color='#5865f2', linewidth=2.5, marker='o', markersize=4, label='Курс ETH')
+        ax.plot(times, prices, color='#5865f2', linewidth=2.5, marker='o', markersize=4, label='Курс CAP')
         ax.fill_between(range(len(prices)), prices, min(prices) - 10, alpha=0.15, color='#5865f2')
         
         if lower_target:
@@ -164,7 +164,7 @@ async def global_price_monitor(application: Application):
                                 
                             alert_msg = (
                                 f"{emoji}\n\n"
-                                f"Ціна ETH {trend_str} на <b>{abs(percent_change):.2f}%</b>\n"
+                                f"Ціна CAP {trend_str} на <b>{abs(percent_change):.2f}%</b>\n"
                                 f"Попередня опорна: <code>${ref_price:,.2f}</code>\n"
                                 f"Поточна ціна: <b>${price:,.2f}</b>\n\n"
                                 f"📌 <i>Цю ціну (${price:,.2f}) зафіксовано як нову опорну точку.</i>"
@@ -233,7 +233,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
         await update.message.reply_text(
-            "🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.\nАвтоматично сповіщаю про коливання ринку на ±2%.",
+            "🚀 <b>CAP Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.\nАвтоматично сповіщаю про коливання ринку на ±2%.",
             reply_markup=get_menu_keyboard(),
             parse_mode="HTML"
         )
@@ -255,7 +255,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             display_time, display_price = global_price_history[-1]
 
         if display_price:
-            msg = f"💰 <b>Поточний курс ETH</b>\n\n<code>${display_price:,.2f}</code>\n\n⏰ Оновлено: {display_time.strftime('%H:%M:%S')}"
+            msg = f"💰 <b>Поточний курс CAP</b>\n\n<code>${display_price:,.2f}</code>\n\n⏰ Оновлено: {display_time.strftime('%H:%M:%S')}"
         else:
             msg = "⏳ Зачекайте, завантажуються перші дані..."
             
@@ -331,7 +331,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "back":
         context.user_data['active_price_msg_id'] = None
-        await query.edit_message_text("🚀 <b>ETH Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.", reply_markup=get_menu_keyboard(), parse_mode="HTML")
+        await query.edit_message_text("🚀 <b>CAP Price Monitor</b>\n\nОпитування курсу відбувається кожні 10 секунд.", reply_markup=get_menu_keyboard(), parse_mode="HTML")
         return ConversationHandler.END
 
     elif query.data == "back_from_chart":
@@ -340,7 +340,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
         except:
             pass
-        await update.effective_message.reply_text("🚀 <b>ETH Price Monitor</b>", reply_markup=get_menu_keyboard(), parse_mode="HTML")
+        await update.effective_message.reply_text("🚀 <b>CAP Price Monitor</b>", reply_markup=get_menu_keyboard(), parse_mode="HTML")
         return ConversationHandler.END
 
 async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
