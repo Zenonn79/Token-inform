@@ -47,12 +47,10 @@ def format_price(price):
     if price is None:
         return "н/д"
     price = float(price)
-    if price >= 1:
-        return f"${price:,.2f}"
-    elif price >= 0.01:
-        return f"${price:,.4f}"
-    else:
-        return f"${price:,.6f}"
+    # Без явної точності Python сам показує стільки знаків після коми,
+    # скільки реально несе число (0.05871 -> "0.05871", 3000.4 -> "3,000.4"),
+    # нічого не округлюючи і не дописуючи зайвих нулів.
+    return f"${price:,}"
 
 
 async def get_eth_price():
