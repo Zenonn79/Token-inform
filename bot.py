@@ -37,7 +37,7 @@ global_price_history = []  # Список кортежів: (datetime_obj, price
 active_users = set()       # Користувачі, які взаємодіяли з ботом
 
 async def get_eth_price():
-    """Отримує актуальну ціну ETH з Coingecko"""
+    """Отримує актуальну ціну CAP з Coingecko"""
     try:
         async with aiohttp.ClientSession() as session:
             url = "https://api.coingecko.com/api/v3/simple/price?ids=cap-4&vs_currencies=usd"
@@ -86,7 +86,7 @@ def create_price_chart(lower_target=None, upper_target=None):
         ax.set_ylabel('Ціна (USD)', color='#b5bac1', fontsize=10)
         
         title_text = (
-            f"📈 Історія цін Ефіра (сьогодні)\n"
+            f"📈 Історія цін CAP (сьогодні)\n"
             f"Min за день: ${min_today:,.2f}  |  Max за день: ${max_today:,.2f}"
         )
         ax.set_title(title_text, color='#ffffff', fontsize=11, fontweight='bold', pad=12)
