@@ -34,11 +34,12 @@ if not TELEGRAM_TOKEN:
 
 # --- Список валют, доступних для моніторингу ---
 CURRENCIES = {
+    "cap":      {"cg_id": "cap-4",    "label": "CAP",      "symbol": "CAP", "emoji": "🟡"},
     "ethereum": {"cg_id": "ethereum", "label": "Ethereum", "symbol": "ETH", "emoji": "🔷"},
     "ripple":   {"cg_id": "ripple",   "label": "Ripple",   "symbol": "XRP", "emoji": "💧"},
     "solana":   {"cg_id": "solana",   "label": "Solana",   "symbol": "SOL", "emoji": "🟣"},
 }
-DEFAULT_CURRENCY = "ethereum"
+DEFAULT_CURRENCY = "cap"
 
 # Глобальні змінні для моніторингу: окремо ціна та історія для кожної валюти
 price_store = {cid: {"current": None, "history": []} for cid in CURRENCIES}
