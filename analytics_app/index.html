@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Token-inform Analytics</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;font-family:system-ui,Arial;background:#101827;color:#e9eef8}
+body{max-width:720px;margin:auto;padding:18px}h1{font-size:22px}button,input,select{font:inherit;border-radius:10px;padding:10px;border:1px solid #34425a;background:#1c293c;color:white}
+button{cursor:pointer}.active{background:#2563eb}.card{background:#1c293c;border-radius:14px;padding:16px;margin:12px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.muted{color:#9baec8}.price{font-size:30px;font-weight:700}
+</style></head><body>
+<h1>📊 Token-inform Analytics</h1>
+<div class="row"><button id="linear" class="active">USDT Perpetual</button><button id="spot">Spot</button></div>
+<div class="card"><div class="row"><input id="symbol" value="BTCUSDT" aria-label="Торгова пара">
+<select id="interval"><option value="5">5 хв</option><option value="15" selected>15 хв</option><option value="60">1 год</option><option value="240">4 год</option><option value="D">1 день</option></select>
+<button id="refresh">Оновити</button></div></div>
+<div class="card"><div class="muted" id="pair">BTCUSDT</div><div class="price" id="price">—</div>
+<div id="change" class="muted">Зміна за 24 год: —</div><div id="volume" class="muted">Обсяг за 24 год: —</div></div>
+<div class="card"><b>Останні закриті свічки</b><div id="candles" class="muted">Завантаження…</div></div>
+<p class="muted">Дані Bybit. Перша тестова версія: лише перегляд ринку, без торгівлі.</p>
+<script>
+window.Telegram?.WebApp?.ready();
+window.Telegram?.WebApp?.expand();
+let market='linear';
+const el=id=>document.getElementById(id);
+for(const m of ['spot','linear'])el(m).onclick=()=>{market=m;for(const x of ['spot','linear'])el(x).classList.toggle('active',x===m);load()};
+el('refresh').onclick=load;el('interval').onchange=load;
+async function get(path,params){const r=await fetch(path+'?'+new URLSearchParams(params));if(!r.ok)throw new Error((await r.json()).detail||'Помилка запиту');return r.json()}
+async function load(){
+const symbol=el('symbol').value.trim().toUpperCase();
+el('pair').textContent=symbol+' · '+(market==='spot'?'Spot':'Perpetual');
+el('price').textContent='…';el('candles').textContent='Завантаження…';
+try{
+const [t,k]=await Promise.all([get('/api/ticker',{category:market,symbol}),get('/api/candles',{category:market,symbol,interval:el('interval').value})]);
+el('price').textContent=Number(t.price).toLocaleString('en-US',{maximumFractionDigits:10})+' USDT';
+el('change').textContent='Зміна за 24 год: '+(Number(t.change24h)*100).toFixed(2)+'%';
+el('volume').textContent='Обсяг за 24 год: '+Number(t.volume24h).toLocaleString('en-US');
+const closed=k.candles.slice(0,-1).slice(-5).reverse();
+el('candles').innerHTML='';
+for(const c of closed){const p=document.createElement('p');p.textContent=new Date(c.time*1000).toLocaleString('uk-UA')+' · '+c.close;el('candles').append(p)}
+}catch(e){el('price').textContent='—';el('change').textContent=e.message;el('volume').textContent='';el('candles').textContent='Не вдалося отримати дані'}
+}
+load();
+</script></body></html>
